@@ -437,7 +437,8 @@ Your Automation System"""
             age_days = SendingStats.get_account_age_days(email)
             week = (age_days // 7) + 1
             
-            status = "🔴 blocked" if email in self._blocked_accounts else "🟢 active"
+            from database import BlockedAccounts
+            status = "🔴 blocked" if BlockedAccounts.is_blocked(email) else "🟢 active"
             warmup_info = f"(week {week})" if self.warmup_enabled else ""
             
             print(f"   {i}. {email} ({account['sender_name']})")
@@ -465,6 +466,7 @@ Your Automation System"""
             total_remaining += remaining
             age_days = SendingStats.get_account_age_days(email)
             
+            from database import BlockedAccounts
             accounts_status.append({
                 "email": email,
                 "sends_today": sends_today,
@@ -472,7 +474,7 @@ Your Automation System"""
                 "remaining": remaining,
                 "age_days": age_days,
                 "week": (age_days // 7) + 1,
-                "blocked": email in self._blocked_accounts
+                "blocked": BlockedAccounts.is_blocked(email)
             })
         
         return {
