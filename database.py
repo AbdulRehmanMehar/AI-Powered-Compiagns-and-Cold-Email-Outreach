@@ -1,5 +1,5 @@
 from pymongo import MongoClient
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 import config
 
@@ -121,6 +121,21 @@ class Email:
         return count > 0
     
     @staticmethod
+    def has_been_contacted_by_email(email_address: str) -> bool:
+        """Check if this email address has been contacted (regardless of lead_id)"""
+        # First find all leads with this email
+        lead = leads_collection.find_one({"email": email_address})
+        if not lead:
+            return False
+        
+        from bson import ObjectId
+        count = emails_collection.count_documents({
+            "lead_id": lead["_id"],
+            "status": {"$in": [Email.STATUS_SENT, Email.STATUS_REPLIED, Email.STATUS_OPENED]}
+        })
+        return count > 0
+    
+    @staticmethod
     def get_contacted_emails() -> set:
         """Get set of all email addresses that have been contacted"""
         pipeline = [
@@ -136,6 +151,27 @@ class Email:
         ]
         results = emails_collection.aggregate(pipeline)
         return {r["_id"] for r in results if r["_id"]}
+    
+    @staticmethod
+    def get_email_count_for_lead(lead_id: str, days: int = None) -> int:
+        """Get count of emails sent to a lead, optionally within last N days"""
+        from bson import ObjectId
+        from datetime import timedelta
+        
+        query = {"lead_id": ObjectId(lead_id)}
+        
+        if days:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            query["created_at"] = {"$gte": cutoff}
+        
+        return emails_collection.count_documents(query)
+    
+    @staticmethod
+    def can_email_lead(lead_id: str, max_emails_per_week: int = 3) -> bool:
+        """Check if we can send another email to this lead (spam prevention)"""
+        # Don't send more than max_emails_per_week in a 7-day window
+        recent_count = Email.get_email_count_for_lead(lead_id, days=7)
+        return recent_count < max_emails_per_week
     
     @staticmethod
     def mark_failed(email_id: str, error: str):
@@ -301,3 +337,169 @@ class SendingStats:
         ]
         result = list(SendingStats._collection.aggregate(pipeline))
         return result[0]["total"] if result else 0
+
+
+class BlockedAccounts:
+    """Track accounts blocked by Zoho (554 errors) with cooldown periods"""
+    
+    _collection = db["blocked_accounts"]
+    _collection.create_index("account_email", unique=True)
+    
+    # Default cooldown period in hours (48 hours = 2 days)
+    DEFAULT_COOLDOWN_HOURS = 48
+    
+    @staticmethod
+    def mark_blocked(account_email: str, error_message: str = None, cooldown_hours: int = None):
+        """Mark an account as blocked with a cooldown period"""
+        cooldown = cooldown_hours or BlockedAccounts.DEFAULT_COOLDOWN_HOURS
+        blocked_until = datetime.utcnow() + timedelta(hours=cooldown)
+        
+        BlockedAccounts._collection.update_one(
+            {"account_email": account_email},
+            {
+                "$set": {
+                    "blocked_at": datetime.utcnow(),
+                    "blocked_until": blocked_until,
+                    "error_message": error_message,
+                    "cooldown_hours": cooldown
+                },
+                "$inc": {"block_count": 1}
+            },
+            upsert=True
+        )
+        print(f"   ⛔ Account {account_email} blocked until {blocked_until.strftime('%Y-%m-%d %H:%M')} UTC")
+    
+    @staticmethod
+    def is_blocked(account_email: str) -> bool:
+        """Check if an account is currently blocked"""
+        record = BlockedAccounts._collection.find_one({"account_email": account_email})
+        if not record:
+            return False
+        
+        # Check if cooldown has expired
+        if record.get("blocked_until") and record["blocked_until"] > datetime.utcnow():
+            return True
+        
+        return False
+    
+    @staticmethod
+    def get_blocked_until(account_email: str) -> Optional[datetime]:
+        """Get when the block expires for an account"""
+        record = BlockedAccounts._collection.find_one({"account_email": account_email})
+        if record and record.get("blocked_until"):
+            return record["blocked_until"]
+        return None
+    
+    @staticmethod
+    def unblock(account_email: str):
+        """Manually unblock an account"""
+        BlockedAccounts._collection.delete_one({"account_email": account_email})
+    
+    @staticmethod
+    def get_all_blocked() -> List[Dict]:
+        """Get all currently blocked accounts"""
+        now = datetime.utcnow()
+        return list(BlockedAccounts._collection.find({"blocked_until": {"$gt": now}}))
+    
+    @staticmethod
+    def cleanup_expired():
+        """Remove expired blocks"""
+        now = datetime.utcnow()
+        result = BlockedAccounts._collection.delete_many({"blocked_until": {"$lte": now}})
+        if result.deleted_count > 0:
+            print(f"   🔓 Unblocked {result.deleted_count} account(s) after cooldown expired")
+
+
+class FailedEmails:
+    """Track failed emails for retry logic"""
+    
+    MAX_RETRIES = 3
+    RETRY_DELAY_HOURS = [1, 6, 24]  # Wait 1h, then 6h, then 24h between retries
+    
+    @staticmethod
+    def get_emails_to_retry() -> List[Dict]:
+        """Get failed emails that are eligible for retry"""
+        from bson import ObjectId
+        
+        # Find failed emails with retry_count < MAX_RETRIES
+        pipeline = [
+            {"$match": {
+                "status": Email.STATUS_FAILED,
+                "$or": [
+                    {"retry_count": {"$exists": False}},
+                    {"retry_count": {"$lt": FailedEmails.MAX_RETRIES}}
+                ]
+            }},
+            # Check if enough time has passed since last attempt
+            {"$addFields": {
+                "retry_count": {"$ifNull": ["$retry_count", 0]},
+                "last_attempt": {"$ifNull": ["$last_retry_at", "$created_at"]}
+            }},
+            {"$lookup": {
+                "from": "leads",
+                "localField": "lead_id",
+                "foreignField": "_id",
+                "as": "lead"
+            }},
+            {"$unwind": "$lead"}
+        ]
+        
+        candidates = list(emails_collection.aggregate(pipeline))
+        
+        # Filter by retry delay
+        now = datetime.utcnow()
+        eligible = []
+        
+        for email in candidates:
+            retry_count = email.get("retry_count", 0)
+            last_attempt = email.get("last_attempt", email.get("created_at"))
+            
+            if retry_count >= len(FailedEmails.RETRY_DELAY_HOURS):
+                delay_hours = FailedEmails.RETRY_DELAY_HOURS[-1]
+            else:
+                delay_hours = FailedEmails.RETRY_DELAY_HOURS[retry_count]
+            
+            next_retry_at = last_attempt + timedelta(hours=delay_hours)
+            
+            if now >= next_retry_at:
+                eligible.append(email)
+        
+        return eligible
+    
+    @staticmethod
+    def mark_retry_attempt(email_id: str, success: bool, error: str = None):
+        """Record a retry attempt"""
+        from bson import ObjectId
+        
+        update = {
+            "$inc": {"retry_count": 1},
+            "$set": {"last_retry_at": datetime.utcnow()}
+        }
+        
+        if success:
+            update["$set"]["status"] = Email.STATUS_SENT
+            update["$set"]["sent_at"] = datetime.utcnow()
+        else:
+            update["$set"]["last_error"] = error
+        
+        emails_collection.update_one(
+            {"_id": ObjectId(email_id)},
+            update
+        )
+    
+    @staticmethod
+    def get_retry_stats() -> Dict:
+        """Get statistics about failed/retryable emails"""
+        pipeline = [
+            {"$match": {"status": Email.STATUS_FAILED}},
+            {"$group": {
+                "_id": None,
+                "total_failed": {"$sum": 1},
+                "with_retries": {"$sum": {"$cond": [{"$gt": [{"$ifNull": ["$retry_count", 0]}, 0]}, 1, 0]}},
+                "max_retries_reached": {"$sum": {"$cond": [{"$gte": [{"$ifNull": ["$retry_count", 0]}, FailedEmails.MAX_RETRIES]}, 1, 0]}}
+            }}
+        ]
+        result = list(emails_collection.aggregate(pipeline))
+        if result:
+            return result[0]
+        return {"total_failed": 0, "with_retries": 0, "max_retries_reached": 0}

@@ -41,7 +41,10 @@ class ZohoEmailSender:
         self._current_account_index = 0
         self._emails_sent_current_account = 0
         self._connections: Dict[str, smtplib.SMTP] = {}  # email -> connection
-        self._blocked_accounts: set = set()  # Track accounts blocked by Zoho
+        
+        # Load blocked accounts from database (persistent across restarts)
+        from database import BlockedAccounts
+        BlockedAccounts.cleanup_expired()  # Clear expired blocks on startup
         
         if not self.accounts:
             raise ValueError("No Zoho email accounts configured. Check ZOHO_EMAILS in .env")
@@ -101,14 +104,21 @@ class ZohoEmailSender:
     
     def _get_next_account(self) -> Optional[Dict[str, str]]:
         """Get the next account to use based on rotation strategy and limits"""
+        from database import BlockedAccounts
+        
         # Filter out blocked accounts AND accounts at daily limit
         available_accounts = []
+        blocked_count = 0
         
         for account in self.accounts:
             email = account["email"]
             
-            # Skip blocked accounts
-            if email in self._blocked_accounts:
+            # Skip blocked accounts (persistent in database)
+            if BlockedAccounts.is_blocked(email):
+                blocked_until = BlockedAccounts.get_blocked_until(email)
+                if blocked_until:
+                    print(f"   ⏳ {email} blocked until {blocked_until.strftime('%Y-%m-%d %H:%M')} UTC")
+                blocked_count += 1
                 continue
             
             # Check daily limit
@@ -118,12 +128,9 @@ class ZohoEmailSender:
         
         if not available_accounts:
             # Check if all accounts are blocked vs at limit
-            all_blocked = all(a["email"] in self._blocked_accounts for a in self.accounts)
-            if all_blocked:
-                print("   ⚠️ All accounts are blocked! Resetting blocked list to retry...")
-                self._blocked_accounts.clear()
-                # Recurse to try again
-                return self._get_next_account()
+            if blocked_count == len(self.accounts):
+                print("   ⚠️ All accounts are blocked by Zoho! Waiting for cooldown to expire...")
+                return None
             else:
                 print("   🛑 All accounts have reached their daily sending limit!")
                 return None
@@ -145,7 +152,7 @@ class ZohoEmailSender:
             account = self.accounts[self._current_account_index]
             email = account["email"]
             
-            if email not in self._blocked_accounts:
+            if not BlockedAccounts.is_blocked(email):
                 can_send, _, _ = self._can_account_send(email)
                 if can_send:
                     return account
@@ -156,13 +163,12 @@ class ZohoEmailSender:
         
         return None
     
-    def _mark_account_blocked(self, email: str):
-        """Mark an account as blocked (554 error from Zoho)"""
-        if email not in self._blocked_accounts:
-            print(f"   ⛔ Account {email} blocked by Zoho - rotating to next account")
-            self._blocked_accounts.add(email)
-            # Force rotation to next account
-            self._emails_sent_current_account = self.emails_per_account
+    def _mark_account_blocked(self, email: str, error_message: str = None):
+        """Mark an account as blocked (554 error from Zoho) - persisted to database"""
+        from database import BlockedAccounts
+        BlockedAccounts.mark_blocked(email, error_message)
+        # Force rotation to next account
+        self._emails_sent_current_account = self.emails_per_account
     
     def _get_connection(self, account: Dict[str, str]) -> Optional[smtplib.SMTP]:
         """Get or create SMTP connection for an account"""
@@ -307,7 +313,7 @@ class ZohoEmailSender:
             # Check if account is blocked by Zoho (554 error)
             error_code = getattr(e, 'smtp_code', None) or (e.args[0] if e.args and isinstance(e.args[0], int) else None)
             if error_code == 554 or '554' in str(e):
-                self._mark_account_blocked(from_email)
+                self._mark_account_blocked(from_email, str(e))
             
             # Remove dead connection
             if from_email in self._connections:

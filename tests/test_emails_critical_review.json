@@ -1,0 +1,42 @@
+[
+  {
+    "lead": "Sarah at FinFlow",
+    "subject": "quick thought for FinFlow",
+    "body": "I noticed that FinFlow recently launched an AI-driven feature for personalized recommendations. How are you balancing innovation with the stringent compliance needs in FinTech? \n\nWe helped another fintech boost transaction throughput by 2.7x, with zero downtime in 10 weeks. Open to hearing more?",
+    "word_count": 43,
+    "case_study": "a Series B fintech",
+    "research_confidence": "medium"
+  },
+  {
+    "lead": "Marcus at HealthSync",
+    "subject": "Marcus?",
+    "body": "I noticed HealthSync's new telehealth platform launch aimed at enhancing patient-doctor interactions. How are you navigating the challenges of data security and compliance in this rapidly evolving space? We helped a health startup achieve full HIPAA compliance and launch in under 2 months. Curious if that's useful? Interested?",
+    "word_count": 48,
+    "case_study": "a HIPAA-compliant health startup",
+    "research_confidence": "medium"
+  },
+  {
+    "lead": "Emily at DataPipe",
+    "subject": "Emily?",
+    "body": "I noticed DataPipe's recent launch of enhanced data visualization features. How are you ensuring the infrastructure can handle the increased demand and complexity? Timpl saw 3.2x faster deployment and 41% cost cuts in 12 weeks with us. Interested in hearing more?",
+    "word_count": 41,
+    "case_study": "Timpl",
+    "research_confidence": "medium"
+  },
+  {
+    "lead": "Jake at QuickShip",
+    "subject": "Jake?",
+    "body": "I noticed QuickShip's innovative approach with your new AI-driven delivery route optimization feature. How are you managing the increased data processing demands that come with such advancements? StratMap raised Series A quickly after launch. Could be worth a chat? Interested?",
+    "word_count": 40,
+    "case_study": "StratMap",
+    "research_confidence": "medium"
+  },
+  {
+    "lead": "Priya at LearnFast",
+    "subject": "Priya?",
+    "body": "LearnFast's new AI platform is impressive! Scaling tech in diverse schools sounds tricky. We helped a fintech boost its transaction speed 2.7x with zero downtime in just 10 weeks. Worth a chat?",
+    "word_count": 32,
+    "case_study": "a Series B fintech",
+    "research_confidence": "high"
+  }
+]

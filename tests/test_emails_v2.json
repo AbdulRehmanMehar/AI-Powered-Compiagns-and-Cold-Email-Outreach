@@ -1,0 +1,42 @@
+[
+  {
+    "lead": "James at DataVault",
+    "subject": "James?",
+    "body": "DataVault just launched that new real-time data ingestion platform. Handling data speed and keeping it clean at scale must be tough. a Enterprise / Staffing company hit 3.2x faster deploys and cut costs 41% in 12 weeks. worth exploring?",
+    "word_count": 39,
+    "case_study": "an enterprise staffing company",
+    "issues": []
+  },
+  {
+    "lead": "Sarah at RetailAI",
+    "subject": "Sarah?",
+    "body": "RetailAI\u2019s new AI inventory platform looks like a game changer. Balancing stock levels while scaling sounds tough. a HR Tech / AI company cut manual work 43% in 8 weeks with better data tools. thoughts?",
+    "word_count": 35,
+    "case_study": "an HR tech startup",
+    "issues": []
+  },
+  {
+    "lead": "Kevin at CyberShield",
+    "subject": "Kevin?",
+    "body": "CyberShield's new AI threat detection sounds next level. Keeping up with fast-changing threats while cutting false alarms must be tough. a HR Tech / AI company cut manual processing time by 43% in 8 weeks. thoughts?",
+    "word_count": 36,
+    "case_study": "an HR tech startup",
+    "issues": []
+  },
+  {
+    "lead": "Emily at EduLearn",
+    "subject": "Emily?",
+    "body": "EduLearn adding AI and machine learning courses is huge. Scaling engineering fast without breaking the platform must be tough. a HR Tech / AI company cut manual processing by 43% in 8 weeks. interested?",
+    "word_count": 34,
+    "case_study": "an HR tech startup",
+    "issues": []
+  },
+  {
+    "lead": "Marcus at GreenFleet",
+    "subject": "Marcus?",
+    "body": "GreenFleet's rollout of 500 electric trucks with a top logistics firm is huge. Scaling production and supply chain on tight deadlines must be intense. a HR Tech / AI company cut manual processing by 43% in 8 weeks. make sense?",
+    "word_count": 40,
+    "case_study": "an HR tech startup",
+    "issues": []
+  }
+]

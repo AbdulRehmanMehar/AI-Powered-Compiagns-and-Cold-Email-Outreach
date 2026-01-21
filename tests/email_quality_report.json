@@ -1,0 +1,1016 @@
+{
+  "analysis_date": "2026-01-21T18:04:42.387677",
+  "summary": {
+    "total_analyzed": 50,
+    "average_score": 91.2,
+    "grades": {
+      "A": 48,
+      "B": 1,
+      "C": 1
+    }
+  },
+  "top_issues": [
+    [
+      "\u274c Multiple case studies",
+      37
+    ],
+    [
+      "\u274c Generic 'saw something' without specifics",
+      2
+    ]
+  ],
+  "duplicate_sends": {
+    "leads_emailed_multiple_times": 16,
+    "worst_offenders": [
+      {
+        "lead_id": "6970bf342843b12ff906113d",
+        "emails_sent": 8
+      },
+      {
+        "lead_id": "6970bf342843b12ff9061146",
+        "emails_sent": 7
+      },
+      {
+        "lead_id": "6970bf342843b12ff9061155",
+        "emails_sent": 6
+      },
+      {
+        "lead_id": "6970bf342843b12ff906114c",
+        "emails_sent": 6
+      },
+      {
+        "lead_id": "6970c02b2843b12ff90613ac",
+        "emails_sent": 5
+      }
+    ]
+  },
+  "emails": [
+    {
+      "email_id": "69710f4befb10fd5c3a8571e",
+      "subject": "thought about this",
+      "lead": "Meenu Singh at PikMe",
+      "word_count": 52,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (52 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "69710943efb10fd5c3a8571d",
+      "subject": "thought about this",
+      "lead": "Anthony Coste at LikeHoop",
+      "word_count": 45,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (45 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "697105b6816cbf0d6cf03914",
+      "subject": "thought about Formata?",
+      "lead": "Amelia Wampler at Formata.io",
+      "word_count": 52,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (52 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "697100b4816cbf0d6cf03913",
+      "subject": "thought about Forge",
+      "lead": "Angelo Liao at Forge",
+      "word_count": 44,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (44 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970faa4816cbf0d6cf03912",
+      "subject": "thought about this",
+      "lead": "Xuejun Xie at PhantaField",
+      "word_count": 47,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (47 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970f3a9816cbf0d6cf03911",
+      "subject": "thought about this",
+      "lead": "Veronika Y. at Traces AI",
+      "word_count": 52,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (52 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970ebfc816cbf0d6cf03910",
+      "subject": "thought about Honbu",
+      "lead": "Rich Lee at Honbu",
+      "word_count": 44,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (44 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970e59a816cbf0d6cf0390f",
+      "subject": "thought about this",
+      "lead": "Nate Brown at Preshift App",
+      "word_count": 49,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (49 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970dd92816cbf0d6cf0390e",
+      "subject": "random question",
+      "lead": "Meenu Singh at PikMe",
+      "word_count": 61,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (2 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (61 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970d7d5816cbf0d6cf0390d",
+      "subject": "saw something curious",
+      "lead": "Anthony Coste at LikeHoop",
+      "word_count": 54,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (54 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970d3d6e64d3e0c087fc19a",
+      "subject": "thought about this",
+      "lead": "Anthony Coste at LikeHoop",
+      "word_count": 50,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (50 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970ca2fba74c6d4acb562c2",
+      "subject": "thought about this",
+      "lead": "Anthony Coste at LikeHoop",
+      "word_count": 42,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (42 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c58f53c65581bc787cd0",
+      "subject": "thought about this",
+      "lead": "Emin Israfil at Rubbish",
+      "word_count": 47,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (47 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c58653c65581bc787ccf",
+      "subject": "saw something",
+      "lead": "Steve Nauta at Direct Sidekick",
+      "word_count": 44,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (2 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (44 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c57d53c65581bc787cce",
+      "subject": "saw something at Nibble",
+      "lead": "Jamie Frew at Nibble",
+      "word_count": 45,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (4 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (45 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c57553c65581bc787ccd",
+      "subject": "thought about this",
+      "lead": "Tim Janssen at Sofar Ocean",
+      "word_count": 49,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (49 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c56c53c65581bc787ccc",
+      "subject": "Sofar Ocean?",
+      "lead": "Eric Stackpole at Sofar Ocean",
+      "word_count": 43,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (2 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (43 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c56153c65581bc787ccb",
+      "subject": "thought about this",
+      "lead": "CJ Cummings at Formata.io",
+      "word_count": 42,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (42 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c55953c65581bc787cca",
+      "subject": "thought about Fonzy",
+      "lead": "Ariel Peguero at Fonzy, Inc.",
+      "word_count": 45,
+      "score": 85,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [
+        "\u26a0\ufe0f First line could be more specific"
+      ],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 Good length (45 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "bounced"
+    },
+    {
+      "email_id": "6970c55053c65581bc787cc9",
+      "subject": "thought about this",
+      "lead": "Luke Gall at Ultimate Drill Book",
+      "word_count": 57,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (57 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c54853c65581bc787cc8",
+      "subject": "saw something helpful",
+      "lead": "Steve Nauta at Direct Sidekick",
+      "word_count": 42,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (42 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c53e53c65581bc787cc7",
+      "subject": "thought about this",
+      "lead": "Amelia Wampler at Formata.io",
+      "word_count": 38,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (38 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c53653c65581bc787cc6",
+      "subject": "thought about this",
+      "lead": "Angelo Liao at Forge",
+      "word_count": 50,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (50 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c52d53c65581bc787cc5",
+      "subject": "thought about this",
+      "lead": "Xuejun Xie at PhantaField",
+      "word_count": 38,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (38 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c52553c65581bc787cc4",
+      "subject": "thought about this",
+      "lead": "Veronika Y. at Traces AI",
+      "word_count": 43,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (43 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c51c53c65581bc787cc3",
+      "subject": "thought about this",
+      "lead": "Rich Lee at Honbu",
+      "word_count": 52,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (52 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c51253c65581bc787cc2",
+      "subject": "thought about this",
+      "lead": "Nate Brown at Preshift App",
+      "word_count": 55,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (55 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c50853c65581bc787cc1",
+      "subject": "thought about this",
+      "lead": "Meenu Singh at PikMe",
+      "word_count": 52,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (52 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c50053c65581bc787cc0",
+      "subject": "thought about this",
+      "lead": "Anthony Coste at LikeHoop",
+      "word_count": 56,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (56 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c418c9dc60ea945e3e91",
+      "subject": "thought about Sofar",
+      "lead": "Eric Stackpole at Sofar Ocean",
+      "word_count": 57,
+      "score": 70,
+      "grade": "B",
+      "issues": [
+        "\u274c Generic 'saw something' without specifics - this is a lie"
+      ],
+      "warnings": [
+        "\u26a0\ufe0f First line could be more specific"
+      ],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 Good length (57 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Single case study: RoboApply",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c40ec9dc60ea945e3e90",
+      "subject": "thought about this",
+      "lead": "CJ Cummings at Formata.io",
+      "word_count": 51,
+      "score": 100,
+      "grade": "A",
+      "issues": [],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (51 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Single case study: RoboApply",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c405c9dc60ea945e3e8f",
+      "subject": "thought about this",
+      "lead": "Ariel Peguero at Fonzy, Inc.",
+      "word_count": 57,
+      "score": 100,
+      "grade": "A",
+      "issues": [],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (57 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Single case study: RoboApply",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "bounced"
+    },
+    {
+      "email_id": "6970c3fcc9dc60ea945e3e8e",
+      "subject": "saw something helpful",
+      "lead": "Luke Gall at Ultimate Drill Book",
+      "word_count": 47,
+      "score": 100,
+      "grade": "A",
+      "issues": [],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (47 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Single case study: RoboApply",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3f3c9dc60ea945e3e8d",
+      "subject": "thought about this",
+      "lead": "Steve Nauta at Direct Sidekick",
+      "word_count": 51,
+      "score": 100,
+      "grade": "A",
+      "issues": [],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (51 words)",
+        "\u2705 Single case study: RoboApply",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3eac9dc60ea945e3e8c",
+      "subject": "thought about this",
+      "lead": "Amelia Wampler at Formata.io",
+      "word_count": 49,
+      "score": 100,
+      "grade": "A",
+      "issues": [],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (49 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Single case study: RoboApply",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3e1c9dc60ea945e3e8b",
+      "subject": "thought about this",
+      "lead": "Angelo Liao at Forge",
+      "word_count": 44,
+      "score": 100,
+      "grade": "A",
+      "issues": [],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (44 words)",
+        "\u2705 Single case study: RoboApply",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3d7c9dc60ea945e3e8a",
+      "subject": "thought about this",
+      "lead": "Xuejun Xie at PhantaField",
+      "word_count": 41,
+      "score": 100,
+      "grade": "A",
+      "issues": [],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (41 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Single case study: RoboApply",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3cec9dc60ea945e3e89",
+      "subject": "thought about this",
+      "lead": "Veronika Y. at Traces AI",
+      "word_count": 42,
+      "score": 100,
+      "grade": "A",
+      "issues": [],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (42 words)",
+        "\u2705 Single case study: RoboApply",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3c6c9dc60ea945e3e88",
+      "subject": "thought about this",
+      "lead": "Rich Lee at Honbu",
+      "word_count": 43,
+      "score": 100,
+      "grade": "A",
+      "issues": [],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (43 words)",
+        "\u2705 Single case study: RoboApply",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3bdc9dc60ea945e3e87",
+      "subject": "thought about this",
+      "lead": "Nate Brown at Preshift App",
+      "word_count": 44,
+      "score": 100,
+      "grade": "A",
+      "issues": [],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (44 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Single case study: RoboApply",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3b4c9dc60ea945e3e86",
+      "subject": "PikMe's speed boost?",
+      "lead": "Meenu Singh at PikMe",
+      "word_count": 42,
+      "score": 100,
+      "grade": "A",
+      "issues": [],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (42 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Single case study: RoboApply",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3acc9dc60ea945e3e85",
+      "subject": "thought about this",
+      "lead": "Anthony Coste at LikeHoop",
+      "word_count": 47,
+      "score": 100,
+      "grade": "A",
+      "issues": [],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (47 words)",
+        "\u2705 Single case study: RoboApply",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c376c9dc60ea945e3e83",
+      "subject": "thought about this",
+      "lead": "Evan Shapiro at Sofar Ocean Technologies",
+      "word_count": 49,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (49 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c36dc9dc60ea945e3e82",
+      "subject": "thought about this",
+      "lead": "Arvindh Lalam at nCorium",
+      "word_count": 49,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (49 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c364c9dc60ea945e3e81",
+      "subject": "saw something cool",
+      "lead": "Alex Giannikoulis at Ivee",
+      "word_count": 42,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (42 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c35cc9dc60ea945e3e80",
+      "subject": "thought about this",
+      "lead": "Whitney Lubin at The Startup Life",
+      "word_count": 59,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (59 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c353c9dc60ea945e3e7f",
+      "subject": "thought about Mobihires",
+      "lead": "Jamie Cid at Mobihires",
+      "word_count": 47,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (47 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c349c9dc60ea945e3e7e",
+      "subject": "thought about this",
+      "lead": "Mark Pierson at CloudBoard LLC",
+      "word_count": 47,
+      "score": 60,
+      "grade": "C",
+      "issues": [
+        "\u274c Generic 'saw something' without specifics - this is a lie",
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [
+        "\u26a0\ufe0f First line could be more specific"
+      ],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 Good length (47 words)",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c341c9dc60ea945e3e7d",
+      "subject": "thought about this",
+      "lead": "Adrian Logan at Nuravine",
+      "word_count": 52,
+      "score": 85,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [
+        "\u26a0\ufe0f First line could be more specific"
+      ],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 Good length (52 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c338c9dc60ea945e3e7c",
+      "subject": "thought about QDTI",
+      "lead": "Colin Connolly at Quantum Diamond Technologies Inc (QDTI)",
+      "word_count": 47,
+      "score": 90,
+      "grade": "A",
+      "issues": [
+        "\u274c Multiple case studies - should be ONE: ['RoboApply', 'StratMap']"
+      ],
+      "warnings": [],
+      "good": [
+        "\u2705 Good subject length (3 words)",
+        "\u2705 First line is specific to company/product",
+        "\u2705 Good length (47 words)",
+        "\u2705 Uses soft CTA",
+        "\u2705 Includes specific numbers"
+      ],
+      "status": "failed"
+    }
+  ]
+}

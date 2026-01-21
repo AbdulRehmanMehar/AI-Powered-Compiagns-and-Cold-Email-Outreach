@@ -1,0 +1,1422 @@
+{
+  "summary": {
+    "total_emails_analyzed": 90,
+    "average_alignment_score": 100.0,
+    "emails_scoring_above_80": 90,
+    "emails_scoring_below_50": 0
+  },
+  "stats": {
+    "total_emails": 90,
+    "sent_emails": 22,
+    "pending_emails": 0,
+    "replied_emails": 0,
+    "failed_emails": 64,
+    "initial_emails": 90,
+    "followup_emails": 0,
+    "reply_rate": 0.0
+  },
+  "common_issues": [],
+  "analyzed_emails": [
+    {
+      "email_id": "69710f4befb10fd5c3a8571e",
+      "subject": "thought about this",
+      "lead_name": "Meenu Singh",
+      "lead_company": "PikMe",
+      "email_type": "initial",
+      "word_count": 52,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (52 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "69710943efb10fd5c3a8571d",
+      "subject": "thought about this",
+      "lead_name": "Anthony Coste",
+      "lead_company": "LikeHoop",
+      "email_type": "initial",
+      "word_count": 45,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (45 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "697105b6816cbf0d6cf03914",
+      "subject": "thought about Formata?",
+      "lead_name": "Amelia Wampler",
+      "lead_company": "Formata.io",
+      "email_type": "initial",
+      "word_count": 52,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (52 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "697100b4816cbf0d6cf03913",
+      "subject": "thought about Forge",
+      "lead_name": "Angelo Liao",
+      "lead_company": "Forge",
+      "email_type": "initial",
+      "word_count": 44,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (44 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970faa4816cbf0d6cf03912",
+      "subject": "thought about this",
+      "lead_name": "Xuejun Xie",
+      "lead_company": "PhantaField",
+      "email_type": "initial",
+      "word_count": 47,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (47 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970f3a9816cbf0d6cf03911",
+      "subject": "thought about this",
+      "lead_name": "Veronika Y.",
+      "lead_company": "Traces AI",
+      "email_type": "initial",
+      "word_count": 52,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (52 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970ebfc816cbf0d6cf03910",
+      "subject": "thought about Honbu",
+      "lead_name": "Rich Lee",
+      "lead_company": "Honbu",
+      "email_type": "initial",
+      "word_count": 44,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (44 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970e59a816cbf0d6cf0390f",
+      "subject": "thought about this",
+      "lead_name": "Nate Brown",
+      "lead_company": "Preshift App",
+      "email_type": "initial",
+      "word_count": 49,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (49 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970dd92816cbf0d6cf0390e",
+      "subject": "random question",
+      "lead_name": "Meenu Singh",
+      "lead_company": "PikMe",
+      "email_type": "initial",
+      "word_count": 61,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (2 words)",
+        "Good email length (61 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970d7d5816cbf0d6cf0390d",
+      "subject": "saw something curious",
+      "lead_name": "Anthony Coste",
+      "lead_company": "LikeHoop",
+      "email_type": "initial",
+      "word_count": 54,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (54 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970d3d6e64d3e0c087fc19a",
+      "subject": "thought about this",
+      "lead_name": "Anthony Coste",
+      "lead_company": "LikeHoop",
+      "email_type": "initial",
+      "word_count": 50,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (50 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970ca2fba74c6d4acb562c2",
+      "subject": "thought about this",
+      "lead_name": "Anthony Coste",
+      "lead_company": "LikeHoop",
+      "email_type": "initial",
+      "word_count": 42,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (42 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c58f53c65581bc787cd0",
+      "subject": "thought about this",
+      "lead_name": "Emin Israfil",
+      "lead_company": "Rubbish",
+      "email_type": "initial",
+      "word_count": 47,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (47 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c58653c65581bc787ccf",
+      "subject": "saw something",
+      "lead_name": "Steve Nauta",
+      "lead_company": "Direct Sidekick",
+      "email_type": "initial",
+      "word_count": 44,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (2 words)",
+        "Good email length (44 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c57d53c65581bc787cce",
+      "subject": "saw something at Nibble",
+      "lead_name": "Jamie Frew",
+      "lead_company": "Nibble",
+      "email_type": "initial",
+      "word_count": 45,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (4 words)",
+        "Good email length (45 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c57553c65581bc787ccd",
+      "subject": "thought about this",
+      "lead_name": "Tim Janssen",
+      "lead_company": "Sofar Ocean",
+      "email_type": "initial",
+      "word_count": 49,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (49 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c56c53c65581bc787ccc",
+      "subject": "Sofar Ocean?",
+      "lead_name": "Eric Stackpole",
+      "lead_company": "Sofar Ocean",
+      "email_type": "initial",
+      "word_count": 43,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (2 words)",
+        "Good email length (43 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c56153c65581bc787ccb",
+      "subject": "thought about this",
+      "lead_name": "CJ Cummings",
+      "lead_company": "Formata.io",
+      "email_type": "initial",
+      "word_count": 42,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (42 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c55953c65581bc787cca",
+      "subject": "thought about Fonzy",
+      "lead_name": "Ariel Peguero",
+      "lead_company": "Fonzy, Inc.",
+      "email_type": "initial",
+      "word_count": 45,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (45 words)"
+      ],
+      "status": "bounced"
+    },
+    {
+      "email_id": "6970c55053c65581bc787cc9",
+      "subject": "thought about this",
+      "lead_name": "Luke Gall",
+      "lead_company": "Ultimate Drill Book",
+      "email_type": "initial",
+      "word_count": 57,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (57 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c54853c65581bc787cc8",
+      "subject": "saw something helpful",
+      "lead_name": "Steve Nauta",
+      "lead_company": "Direct Sidekick",
+      "email_type": "initial",
+      "word_count": 42,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (42 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c53e53c65581bc787cc7",
+      "subject": "thought about this",
+      "lead_name": "Amelia Wampler",
+      "lead_company": "Formata.io",
+      "email_type": "initial",
+      "word_count": 38,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (38 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c53653c65581bc787cc6",
+      "subject": "thought about this",
+      "lead_name": "Angelo Liao",
+      "lead_company": "Forge",
+      "email_type": "initial",
+      "word_count": 50,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (50 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c52d53c65581bc787cc5",
+      "subject": "thought about this",
+      "lead_name": "Xuejun Xie",
+      "lead_company": "PhantaField",
+      "email_type": "initial",
+      "word_count": 38,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (38 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c52553c65581bc787cc4",
+      "subject": "thought about this",
+      "lead_name": "Veronika Y.",
+      "lead_company": "Traces AI",
+      "email_type": "initial",
+      "word_count": 43,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (43 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c51c53c65581bc787cc3",
+      "subject": "thought about this",
+      "lead_name": "Rich Lee",
+      "lead_company": "Honbu",
+      "email_type": "initial",
+      "word_count": 52,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (52 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c51253c65581bc787cc2",
+      "subject": "thought about this",
+      "lead_name": "Nate Brown",
+      "lead_company": "Preshift App",
+      "email_type": "initial",
+      "word_count": 55,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (55 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c50853c65581bc787cc1",
+      "subject": "thought about this",
+      "lead_name": "Meenu Singh",
+      "lead_company": "PikMe",
+      "email_type": "initial",
+      "word_count": 52,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (52 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c50053c65581bc787cc0",
+      "subject": "thought about this",
+      "lead_name": "Anthony Coste",
+      "lead_company": "LikeHoop",
+      "email_type": "initial",
+      "word_count": 56,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (56 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c418c9dc60ea945e3e91",
+      "subject": "thought about Sofar",
+      "lead_name": "Eric Stackpole",
+      "lead_company": "Sofar Ocean",
+      "email_type": "initial",
+      "word_count": 57,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (57 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c40ec9dc60ea945e3e90",
+      "subject": "thought about this",
+      "lead_name": "CJ Cummings",
+      "lead_company": "Formata.io",
+      "email_type": "initial",
+      "word_count": 51,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (51 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c405c9dc60ea945e3e8f",
+      "subject": "thought about this",
+      "lead_name": "Ariel Peguero",
+      "lead_company": "Fonzy, Inc.",
+      "email_type": "initial",
+      "word_count": 57,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (57 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "bounced"
+    },
+    {
+      "email_id": "6970c3fcc9dc60ea945e3e8e",
+      "subject": "saw something helpful",
+      "lead_name": "Luke Gall",
+      "lead_company": "Ultimate Drill Book",
+      "email_type": "initial",
+      "word_count": 47,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (47 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3f3c9dc60ea945e3e8d",
+      "subject": "thought about this",
+      "lead_name": "Steve Nauta",
+      "lead_company": "Direct Sidekick",
+      "email_type": "initial",
+      "word_count": 51,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (51 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3eac9dc60ea945e3e8c",
+      "subject": "thought about this",
+      "lead_name": "Amelia Wampler",
+      "lead_company": "Formata.io",
+      "email_type": "initial",
+      "word_count": 49,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (49 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3e1c9dc60ea945e3e8b",
+      "subject": "thought about this",
+      "lead_name": "Angelo Liao",
+      "lead_company": "Forge",
+      "email_type": "initial",
+      "word_count": 44,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (44 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3d7c9dc60ea945e3e8a",
+      "subject": "thought about this",
+      "lead_name": "Xuejun Xie",
+      "lead_company": "PhantaField",
+      "email_type": "initial",
+      "word_count": 41,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (41 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3cec9dc60ea945e3e89",
+      "subject": "thought about this",
+      "lead_name": "Veronika Y.",
+      "lead_company": "Traces AI",
+      "email_type": "initial",
+      "word_count": 42,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (42 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3c6c9dc60ea945e3e88",
+      "subject": "thought about this",
+      "lead_name": "Rich Lee",
+      "lead_company": "Honbu",
+      "email_type": "initial",
+      "word_count": 43,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (43 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3bdc9dc60ea945e3e87",
+      "subject": "thought about this",
+      "lead_name": "Nate Brown",
+      "lead_company": "Preshift App",
+      "email_type": "initial",
+      "word_count": 44,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (44 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3b4c9dc60ea945e3e86",
+      "subject": "PikMe's speed boost?",
+      "lead_name": "Meenu Singh",
+      "lead_company": "PikMe",
+      "email_type": "initial",
+      "word_count": 42,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (42 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c3acc9dc60ea945e3e85",
+      "subject": "thought about this",
+      "lead_name": "Anthony Coste",
+      "lead_company": "LikeHoop",
+      "email_type": "initial",
+      "word_count": 47,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (47 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c376c9dc60ea945e3e83",
+      "subject": "thought about this",
+      "lead_name": "Evan Shapiro",
+      "lead_company": "Sofar Ocean Technologies",
+      "email_type": "initial",
+      "word_count": 49,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (49 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c36dc9dc60ea945e3e82",
+      "subject": "thought about this",
+      "lead_name": "Arvindh Lalam",
+      "lead_company": "nCorium",
+      "email_type": "initial",
+      "word_count": 49,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (49 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c364c9dc60ea945e3e81",
+      "subject": "saw something cool",
+      "lead_name": "Alex Giannikoulis",
+      "lead_company": "Ivee",
+      "email_type": "initial",
+      "word_count": 42,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (42 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c35cc9dc60ea945e3e80",
+      "subject": "thought about this",
+      "lead_name": "Whitney Lubin",
+      "lead_company": "The Startup Life",
+      "email_type": "initial",
+      "word_count": 59,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (59 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c353c9dc60ea945e3e7f",
+      "subject": "thought about Mobihires",
+      "lead_name": "Jamie Cid",
+      "lead_company": "Mobihires",
+      "email_type": "initial",
+      "word_count": 47,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (47 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c349c9dc60ea945e3e7e",
+      "subject": "thought about this",
+      "lead_name": "Mark Pierson",
+      "lead_company": "CloudBoard LLC",
+      "email_type": "initial",
+      "word_count": 47,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (47 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c341c9dc60ea945e3e7d",
+      "subject": "thought about this",
+      "lead_name": "Adrian Logan",
+      "lead_company": "Nuravine",
+      "email_type": "initial",
+      "word_count": 52,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (52 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c338c9dc60ea945e3e7c",
+      "subject": "thought about QDTI",
+      "lead_name": "Colin Connolly",
+      "lead_company": "Quantum Diamond Technologies Inc (QDTI)",
+      "email_type": "initial",
+      "word_count": 47,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (47 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c32fc9dc60ea945e3e7b",
+      "subject": "thought about this",
+      "lead_name": "Khalil Khouri",
+      "lead_company": "PADL",
+      "email_type": "initial",
+      "word_count": 46,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (46 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c325c9dc60ea945e3e7a",
+      "subject": "thought about this",
+      "lead_name": "Felipe Jauregui",
+      "lead_company": "PADL",
+      "email_type": "initial",
+      "word_count": 44,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (44 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c31cc9dc60ea945e3e79",
+      "subject": "thought about this",
+      "lead_name": "Jamie Frew",
+      "lead_company": "Nibble",
+      "email_type": "initial",
+      "word_count": 55,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (55 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c313c9dc60ea945e3e78",
+      "subject": "thought about this",
+      "lead_name": "Bowie Cheung",
+      "lead_company": "Pepper",
+      "email_type": "initial",
+      "word_count": 41,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (41 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c309c9dc60ea945e3e77",
+      "subject": "thought about this",
+      "lead_name": "Chetan Narain",
+      "lead_company": "Pepper",
+      "email_type": "initial",
+      "word_count": 41,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (41 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c300c9dc60ea945e3e76",
+      "subject": "thought about this",
+      "lead_name": "Emin Israfil",
+      "lead_company": "Rubbish",
+      "email_type": "initial",
+      "word_count": 44,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (44 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c2f7c9dc60ea945e3e75",
+      "subject": "thought about this",
+      "lead_name": "Steve Nauta",
+      "lead_company": "Direct Sidekick",
+      "email_type": "initial",
+      "word_count": 54,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (54 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c2edc9dc60ea945e3e74",
+      "subject": "thought about this",
+      "lead_name": "Jamie Frew",
+      "lead_company": "Nibble",
+      "email_type": "initial",
+      "word_count": 52,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (52 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c2e4c9dc60ea945e3e73",
+      "subject": "thought about Sofar",
+      "lead_name": "Tim Janssen",
+      "lead_company": "Sofar Ocean",
+      "email_type": "initial",
+      "word_count": 56,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (56 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c2dac9dc60ea945e3e72",
+      "subject": "thought about this",
+      "lead_name": "Eric Stackpole",
+      "lead_company": "Sofar Ocean",
+      "email_type": "initial",
+      "word_count": 52,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (52 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c2d2c9dc60ea945e3e71",
+      "subject": "noticed this at Formata.io",
+      "lead_name": "CJ Cummings",
+      "lead_company": "Formata.io",
+      "email_type": "initial",
+      "word_count": 49,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (4 words)",
+        "Good email length (49 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c2c8c9dc60ea945e3e70",
+      "subject": "thought about Fonzy",
+      "lead_name": "Ariel Peguero",
+      "lead_company": "Fonzy, Inc.",
+      "email_type": "initial",
+      "word_count": 45,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (45 words)"
+      ],
+      "status": "bounced"
+    },
+    {
+      "email_id": "6970c2bec9dc60ea945e3e6f",
+      "subject": "drill book insight?",
+      "lead_name": "Luke Gall",
+      "lead_company": "Ultimate Drill Book",
+      "email_type": "initial",
+      "word_count": 50,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (50 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c2b5c9dc60ea945e3e6e",
+      "subject": "thought about this",
+      "lead_name": "Steve Nauta",
+      "lead_company": "Direct Sidekick",
+      "email_type": "initial",
+      "word_count": 54,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (54 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c2acc9dc60ea945e3e6d",
+      "subject": "saw something",
+      "lead_name": "Amelia Wampler",
+      "lead_company": "Formata.io",
+      "email_type": "initial",
+      "word_count": 46,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (2 words)",
+        "Good email length (46 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c2a2c9dc60ea945e3e6c",
+      "subject": "thought about this",
+      "lead_name": "Angelo Liao",
+      "lead_company": "Forge",
+      "email_type": "initial",
+      "word_count": 49,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (49 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c298c9dc60ea945e3e6b",
+      "subject": "thought about this",
+      "lead_name": "Xuejun Xie",
+      "lead_company": "PhantaField",
+      "email_type": "initial",
+      "word_count": 51,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (51 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c28fc9dc60ea945e3e6a",
+      "subject": "thought about this",
+      "lead_name": "Veronika Y.",
+      "lead_company": "Traces AI",
+      "email_type": "initial",
+      "word_count": 48,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (48 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c285c9dc60ea945e3e69",
+      "subject": "thought about this",
+      "lead_name": "Rich Lee",
+      "lead_company": "Honbu",
+      "email_type": "initial",
+      "word_count": 56,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (56 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c27cc9dc60ea945e3e68",
+      "subject": "thought about this",
+      "lead_name": "Nate Brown",
+      "lead_company": "Preshift App",
+      "email_type": "initial",
+      "word_count": 49,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (49 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c273c9dc60ea945e3e67",
+      "subject": "thought about this",
+      "lead_name": "Meenu Singh",
+      "lead_company": "PikMe",
+      "email_type": "initial",
+      "word_count": 47,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (47 words)"
+      ],
+      "status": "failed"
+    },
+    {
+      "email_id": "6970c11200d0f1315ee7f592",
+      "subject": "thought about this",
+      "lead_name": "Jamie Frew",
+      "lead_company": "Nibble",
+      "email_type": "initial",
+      "word_count": 33,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (33 words)"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970c10b00d0f1315ee7f591",
+      "subject": "thought about this",
+      "lead_name": "Tim Janssen",
+      "lead_company": "Sofar Ocean",
+      "email_type": "initial",
+      "word_count": 48,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (48 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970c10400d0f1315ee7f590",
+      "subject": "thought about Sofar",
+      "lead_name": "Eric Stackpole",
+      "lead_company": "Sofar Ocean",
+      "email_type": "initial",
+      "word_count": 51,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (51 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970c0fe00d0f1315ee7f58f",
+      "subject": "thought about this",
+      "lead_name": "CJ Cummings",
+      "lead_company": "Formata.io",
+      "email_type": "initial",
+      "word_count": 43,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (43 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970c0f500d0f1315ee7f58e",
+      "subject": "thought about this",
+      "lead_name": "Ariel Peguero",
+      "lead_company": "Fonzy, Inc.",
+      "email_type": "initial",
+      "word_count": 37,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (37 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "bounced"
+    },
+    {
+      "email_id": "6970c0ef00d0f1315ee7f58d",
+      "subject": "thought about this",
+      "lead_name": "Luke Gall",
+      "lead_company": "Ultimate Drill Book",
+      "email_type": "initial",
+      "word_count": 49,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (49 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970c0e700d0f1315ee7f58c",
+      "subject": "thought about this",
+      "lead_name": "Steve Nauta",
+      "lead_company": "Direct Sidekick",
+      "email_type": "initial",
+      "word_count": 46,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (46 words)"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970c0e100d0f1315ee7f58b",
+      "subject": "thought about this",
+      "lead_name": "Amelia Wampler",
+      "lead_company": "Formata.io",
+      "email_type": "initial",
+      "word_count": 48,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (48 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970c0d900d0f1315ee7f58a",
+      "subject": "thought about this",
+      "lead_name": "Angelo Liao",
+      "lead_company": "Forge",
+      "email_type": "initial",
+      "word_count": 50,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (50 words)"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970c0cf00d0f1315ee7f589",
+      "subject": "thought about this",
+      "lead_name": "Xuejun Xie",
+      "lead_company": "PhantaField",
+      "email_type": "initial",
+      "word_count": 51,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (51 words)"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970c0c600d0f1315ee7f588",
+      "subject": "thought about this",
+      "lead_name": "Veronika Y.",
+      "lead_company": "Traces AI",
+      "email_type": "initial",
+      "word_count": 43,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (43 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970c07800d0f1315ee7f57f",
+      "subject": "thought about this",
+      "lead_name": "Rich Lee",
+      "lead_company": "Honbu",
+      "email_type": "initial",
+      "word_count": 48,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (48 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970c06800d0f1315ee7f57d",
+      "subject": "thought about Preshift",
+      "lead_name": "Nate Brown",
+      "lead_company": "Preshift App",
+      "email_type": "initial",
+      "word_count": 54,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (54 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970c05800d0f1315ee7f57b",
+      "subject": "saw something at PikMe",
+      "lead_name": "Meenu Singh",
+      "lead_company": "PikMe",
+      "email_type": "initial",
+      "word_count": 52,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (4 words)",
+        "Good email length (52 words)"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970c03f00d0f1315ee7f578",
+      "subject": "thought about this",
+      "lead_name": "Anthony Coste",
+      "lead_company": "LikeHoop",
+      "email_type": "initial",
+      "word_count": 53,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (53 words)"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970bf84e30161f8f14715fa",
+      "subject": "quick thought",
+      "lead_name": "Rich Lee",
+      "lead_company": "Honbu",
+      "email_type": "initial",
+      "word_count": 56,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (2 words)",
+        "Good email length (56 words)"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970bf72e30161f8f14715f8",
+      "subject": "thought about this",
+      "lead_name": "Nate Brown",
+      "lead_company": "Preshift App",
+      "email_type": "initial",
+      "word_count": 47,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (47 words)",
+        "Uses soft, low-friction CTA"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970bf62e30161f8f14715f6",
+      "subject": "thought about this",
+      "lead_name": "Meenu Singh",
+      "lead_company": "PikMe",
+      "email_type": "initial",
+      "word_count": 45,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (45 words)"
+      ],
+      "status": "sent"
+    },
+    {
+      "email_id": "6970bf48e30161f8f14715f3",
+      "subject": "thought about this",
+      "lead_name": "Anthony Coste",
+      "lead_company": "LikeHoop",
+      "email_type": "initial",
+      "word_count": 58,
+      "score": 100,
+      "issues": [],
+      "positives": [
+        "Good subject length (3 words)",
+        "Good email length (58 words)"
+      ],
+      "status": "sent"
+    }
+  ],
+  "best_practices_reference": "\nBased on Eric Nowoslawski's 90-page document and LeadGenJay's masterclass:\n\nSUBJECT LINE RULES:\n1. 2-4 words MAX\n2. Must look like it's from a colleague or friend\n3. NO: \"Quick question\", \"Partnership\", \"Intro\", \"[Company] + [Company]\", corporate language\n4. YES: \"{first_name}?\", \"thought about this\", \"re: {company}\", \"saw something\"\n\nFIRST LINE (Preview Text) RULES:\n1. Must create CURIOSITY, not pitch\n2. NO: \"I noticed your company...\", \"I'm reaching out because...\", \"My name is...\"\n3. YES: \"saw something interesting on {company}'s site\", \"random question\", \"this might be off base but\"\n\nBODY RULES:\n1. Under 75-100 words total (75 is better)\n2. ONE pain point only - not a list\n3. Include specific case study with REAL numbers (3.72x not 4x)\n4. Sound like a human, not a template\n5. 6th grade reading level, no jargon\n6. No corporate buzzwords: leverage, synergy, streamline, incentivize\n\nCTA RULES:\n1. Super soft, low friction\n2. NO: \"Let's schedule a call\", \"Are you free Tuesday?\", \"Can we hop on a call?\"\n3. YES: \"worth a quick chat?\", \"make sense to connect?\", \"open to hearing more?\"\n\nTHINGS TO AVOID:\n1. \"I hope this finds you well\"\n2. \"reaching out\" or \"touching base\"\n3. Listing multiple services\n4. Links (especially in first email)\n5. Images\n6. Unsubscribe links (unless required)\n7. Open tracking pixels\n8. More than 4-5 sentences\n9. Sounding salesy or desperate\n10. Guarantees or over-promising\n\nFOLLOW-UP RULES:\n1. Max 2-3 emails in sequence (short sequences = less spam)\n2. Email 2: Same thread, add GENUINE value (not \"just following up\")\n3. Email 3: NEW thread, different subject, different angle\n4. Never say \"just following up\", \"circling back\", \"bumping this\"\n5. Never guilt trip\n\nDELIVERABILITY:\n1. 30 emails per day per mailbox max (some go up to 50)\n2. 10-minute delay between emails\n3. Warm domains for 3-4 weeks before sending\n4. Domain age matters - older is better\n5. 2-5 inboxes per domain\n"
+}

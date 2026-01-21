@@ -140,16 +140,29 @@ class CampaignManager:
         try:
             for lead in leads:
                 lead_id = str(lead["_id"])
+                lead_email = lead.get("email", "")
                 
-                # Check if we already sent to this lead in this campaign
+                # DEDUPLICATION CHECK 1: Already emailed in this campaign
                 existing_emails = Email.get_by_lead_and_campaign(lead_id, campaign_id)
                 if existing_emails:
-                    print(f"Skipping {lead['email']} - already emailed")
+                    print(f"⏭️  Skipping {lead_email} - already emailed in this campaign")
+                    results["skipped"] += 1
+                    continue
+                
+                # DEDUPLICATION CHECK 2: Email address already contacted (any campaign)
+                if Email.has_been_contacted_by_email(lead_email):
+                    print(f"⏭️  Skipping {lead_email} - already contacted in another campaign")
+                    results["skipped"] += 1
+                    continue
+                
+                # SPAM PREVENTION: Check weekly limit
+                if not Email.can_email_lead(lead_id, max_emails_per_week=3):
+                    print(f"⏭️  Skipping {lead_email} - hit weekly email limit")
                     results["skipped"] += 1
                     continue
                 
                 # Generate personalized email
-                print(f"Generating email for {lead['full_name']} ({lead['email']})...")
+                print(f"📧 Generating email for {lead['full_name']} ({lead['email']})...")
                 email_content = self.email_generator.generate_initial_email(
                     lead=lead,
                     campaign_context=campaign_context
@@ -484,6 +497,104 @@ class CampaignManager:
             "created_at": campaign["created_at"],
             "stats": campaign.get("stats", {})
         }
+    
+    def retry_failed_emails(self, dry_run: bool = False) -> Dict[str, Any]:
+        """
+        Retry sending failed emails that are eligible for retry.
+        
+        Failed emails are retried up to 3 times with increasing delays:
+        - 1st retry: after 1 hour
+        - 2nd retry: after 6 hours  
+        - 3rd retry: after 24 hours
+        
+        Args:
+            dry_run: If True, don't actually send emails
+            
+        Returns:
+            Dict with retry results
+        """
+        from database import FailedEmails
+        
+        print("\n" + "="*60)
+        print("🔄 RETRY FAILED EMAILS")
+        print("="*60)
+        
+        # Get eligible emails for retry
+        emails_to_retry = FailedEmails.get_emails_to_retry()
+        
+        if not emails_to_retry:
+            print("   ✅ No failed emails eligible for retry")
+            return {"retried": 0, "succeeded": 0, "failed_again": 0}
+        
+        print(f"   📧 Found {len(emails_to_retry)} email(s) to retry")
+        
+        results = {
+            "retried": 0,
+            "succeeded": 0,
+            "failed_again": 0,
+            "details": []
+        }
+        
+        for email in emails_to_retry:
+            lead = email.get("lead", {})
+            retry_count = email.get("retry_count", 0)
+            
+            print(f"\n   🔄 Retry #{retry_count + 1} for {lead.get('email', 'unknown')}")
+            
+            if dry_run:
+                print(f"      [DRY RUN] Would retry sending to {lead.get('email')}")
+                results["retried"] += 1
+                continue
+            
+            # Attempt to send
+            result = self.email_sender.send_email(
+                to_email=lead.get("email"),
+                subject=email.get("subject", "Follow up"),
+                body=email.get("body", ""),
+                to_name=lead.get("full_name"),
+                html_body=text_to_html(email.get("body", ""))
+            )
+            
+            results["retried"] += 1
+            
+            if result["success"]:
+                FailedEmails.mark_retry_attempt(str(email["_id"]), success=True)
+                results["succeeded"] += 1
+                results["details"].append({
+                    "email": lead.get("email"),
+                    "status": "succeeded",
+                    "retry_count": retry_count + 1
+                })
+                print(f"      ✅ Retry succeeded!")
+            else:
+                FailedEmails.mark_retry_attempt(str(email["_id"]), success=False, error=result.get("error"))
+                results["failed_again"] += 1
+                results["details"].append({
+                    "email": lead.get("email"),
+                    "status": "failed_again",
+                    "retry_count": retry_count + 1,
+                    "error": result.get("error")
+                })
+                print(f"      ❌ Retry failed: {result.get('error')}")
+            
+            # Rate limiting between retries
+            if results["retried"] < len(emails_to_retry):
+                delay = get_random_delay()
+                print(f"      ⏳ Waiting {delay // 60}m before next retry...")
+                time.sleep(delay)
+        
+        print(f"\n   📊 Retry Summary: {results['succeeded']}/{results['retried']} succeeded")
+        return results
+    
+    def get_blocked_accounts_status(self) -> List[Dict]:
+        """Get list of currently blocked email accounts"""
+        from database import BlockedAccounts
+        return BlockedAccounts.get_all_blocked()
+    
+    def get_failed_email_stats(self) -> Dict:
+        """Get statistics about failed emails"""
+        from database import FailedEmails
+        return FailedEmails.get_retry_stats()
 
 
 # Example usage

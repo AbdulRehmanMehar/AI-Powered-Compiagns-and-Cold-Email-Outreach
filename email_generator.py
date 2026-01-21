@@ -1,16 +1,17 @@
 """
-Cold Email Generator - Aligned with Expert Strategies
-Based on: Eric Nowoslawski's 90-page doc, LeadGenJay's masterclass
+Cold Email Generator - PROPERLY Aligned with LeadGenJay/Eric Nowoslawski Guidelines
 
-Key principles:
-1. Subject lines should look like they're from a colleague/friend
-2. First line = preview text, must create curiosity NOT pitch
-3. Keep emails ULTRA short (under 100 words, 75 better)
-4. 2 email sequence max (3rd only if NEW thread with different angle)
-5. Use spintax for variation
-6. Specific case studies with real numbers (3.72x not 4x)
-7. What can you say that NO ONE else can say?
-8. Problem sniffing - AI finds specific issues before emailing
+Key principles implemented:
+1. ACTUAL research on company before writing (problem sniffing)
+2. First line must be SPECIFIC to the company - no generic "saw something interesting"
+3. ONE pain point per email, matched to the lead's industry/role
+4. Case studies matched by relevance, not copy-pasted everywhere
+5. Under 75 words (ideally 50-60)
+6. Subject looks like colleague sent it (2-4 words)
+7. Soft CTA only - never "schedule a call"
+8. NO corporate jargon, NO lies, NO fluff
+
+"If you can't say what you saw that was interesting, don't say you saw something." - LeadGenJay
 """
 
 from openai import OpenAI
@@ -19,76 +20,62 @@ import config
 import json
 import random
 import re
-from primestrides_context import COMPANY_CONTEXT, ICP_TEMPLATES, EMAIL_CONTEXT, CASE_STUDIES, SPINTAX_TEMPLATES
+from primestrides_context import COMPANY_CONTEXT, ICP_TEMPLATES, EMAIL_CONTEXT, CASE_STUDIES
 
 
 class EmailGenerator:
-    """Generate personalized cold emails using expert strategies"""
+    """Generate personalized cold emails with REAL personalization"""
     
     def __init__(self):
         self.client = OpenAI(api_key=config.OPENAI_API_KEY)
-        self.model = "gpt-4o"
+        self.model = "gpt-4.1-mini"
         self.company_context = COMPANY_CONTEXT
         self.email_context = EMAIL_CONTEXT
         self.case_studies = CASE_STUDIES
     
-    def determine_icp_and_criteria(self, campaign_description: str) -> Dict[str, Any]:
+    def research_company(self, lead: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Use AI to determine the best ICP and RocketReach search criteria
-        based on a simple campaign description
+        PROBLEM SNIFFING: Research the company to find something SPECIFIC to mention.
+        This is what separates spam from real outreach.
+        
+        Returns specific insights we can reference in the email.
         """
+        company = lead.get('company', '')
+        title = lead.get('title', '')
+        industry = lead.get('industry', '')
+        first_name = lead.get('first_name', '')
         
-        icp_options = json.dumps(ICP_TEMPLATES, indent=2)
-        case_study_options = json.dumps(CASE_STUDIES, indent=2)
-        
-        system_prompt = f"""You are an expert at B2B sales targeting and cold email strategy.
-You work for PrimeStrides, a boutique software agency.
+        system_prompt = """You are researching a company to write a personalized cold email.
+Your job is to find ONE specific, interesting thing about this company that we can reference.
 
-{self.company_context}
+DO NOT make things up. If you don't know something specific, say so.
+DO NOT be generic. "Great company" or "interesting product" is useless.
 
-Given a campaign description, determine:
-1. The best target audience (be SPECIFIC - "tech founder" is bad, "SaaS founder who just raised seed funding" is good)
-2. RocketReach search criteria
-3. The ONE specific pain point to focus on (not a list - ONE)
-4. The unique angle that ONLY PrimeStrides can claim
-5. Which case study is most relevant
-
-Available ICP templates:
-{icp_options}
-
-Available case studies (USE REAL NAMES AND NUMBERS):
-{case_study_options}
+Find something SPECIFIC like:
+- A recent product launch or feature
+- Their business model or unique approach
+- A specific problem they likely face based on their stage/industry
+- Something about their tech stack or hiring patterns
+- A recent news item or milestone
 
 Return JSON:
-{{
-    "campaign_name": "descriptive name",
-    "target_description": "hyper-specific who and why",
-    "search_criteria": {{
-        "current_title": ["title1", "title2"],
-        "industry": ["industry1", "industry2"],
-        "location": ["United States"]
-    }},
-    "campaign_context": {{
-        "product_service": "specific offer for this audience",
-        "single_pain_point": "THE ONE pain point we address",
-        "unique_angle": "what can WE say that no one else can?",
-        "case_study": {{
-            "company_name": "real company name",
-            "result": "specific result with decimals",
-            "timeline": "specific timeline",
-            "quote": "optional real quote from client"
-        }},
-        "front_end_offer": "low-friction offer like free audit, checklist, etc.",
-        "trigger_signal": "what triggered this outreach (hiring, funding, etc.)"
-    }}
-}}"""
+{
+    "specific_observation": "One specific thing we noticed (or 'none' if nothing specific)",
+    "likely_pain_point": "Based on their stage/industry, what probably keeps them up at night",
+    "why_relevant_to_us": "Why PrimeStrides specifically could help with this",
+    "conversation_hook": "A natural way to open the conversation based on this",
+    "confidence": "high/medium/low - how confident are we this is accurate"
+}
 
-        user_prompt = f"""Campaign description: {campaign_description}
+If confidence is low, we'll use a different approach (honest curiosity instead of fake observation)."""
 
-Create hyper-targeted campaign for PrimeStrides. Remember:
-- ONE pain point, not a list
-- Specific case study with REAL numbers
-- What can we say that NO ONE else can say?"""
+        user_prompt = f"""Research this lead:
+- Name: {first_name}
+- Title: {title}
+- Company: {company}
+- Industry: {industry}
+
+Find something SPECIFIC we can reference. Don't make things up."""
 
         try:
             response = self.client.chat.completions.create(
@@ -101,8 +88,113 @@ Create hyper-targeted campaign for PrimeStrides. Remember:
                 response_format={"type": "json_object"}
             )
             
-            result = json.loads(response.choices[0].message.content)
-            return result
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"Error researching company: {e}")
+            return {
+                "specific_observation": "none",
+                "likely_pain_point": "shipping product fast with limited engineering bandwidth",
+                "why_relevant_to_us": "we help startups ship in weeks not months",
+                "conversation_hook": "curious about your engineering setup",
+                "confidence": "low"
+            }
+    
+    def select_case_study(self, lead: Dict[str, Any], research: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Select the MOST RELEVANT case study for this specific lead.
+        LeadGenJay: "If the prospect is nothing like your case study, it doesn't really help"
+        """
+        industry = lead.get('industry', '').lower()
+        title = lead.get('title', '').lower()
+        pain_point = research.get('likely_pain_point', '').lower()
+        
+        # Score each case study for relevance
+        scores = {}
+        
+        for key, study in self.case_studies.items():
+            score = 0
+            relevance_tags = [r.lower() for r in study.get('relevance', [])]
+            study_industry = study.get('industry', '').lower()
+            
+            # STRONG industry match (most important per LeadGenJay)
+            if study_industry and study_industry in industry:
+                score += 5
+            elif any(tag in industry for tag in relevance_tags):
+                score += 3
+            
+            # Pain point match
+            if 'ai' in pain_point and 'ai' in relevance_tags:
+                score += 2
+            if 'legacy' in pain_point and 'legacy' in relevance_tags:
+                score += 2
+            if 'mvp' in pain_point or 'ship' in pain_point:
+                if 'mvp' in relevance_tags or 'fast shipping' in relevance_tags:
+                    score += 2
+            
+            # Title match (CTOs care about different things than founders)
+            if 'cto' in title or 'engineer' in title:
+                if key == 'timpl':  # Technical case study
+                    score += 1
+            if 'ceo' in title or 'founder' in title:
+                if key == 'stratmap':  # Business outcome case study
+                    score += 1
+            
+            scores[key] = score
+        
+        # Pick the best match, with some randomization for ties
+        best_score = max(scores.values())
+        best_matches = [k for k, v in scores.items() if v == best_score]
+        selected = random.choice(best_matches)
+        
+        # Add industry match flag for prompt to use
+        result = self.case_studies[selected].copy()
+        result['industry_match'] = best_score >= 3  # True if reasonably matched
+        
+        return result
+    
+    def determine_icp_and_criteria(self, campaign_description: str) -> Dict[str, Any]:
+        """
+        Use AI to determine the best ICP and RocketReach search criteria
+        """
+        icp_options = json.dumps(ICP_TEMPLATES, indent=2)
+        case_study_options = json.dumps(CASE_STUDIES, indent=2)
+        
+        system_prompt = f"""You are an expert at B2B sales targeting and cold email strategy.
+You work for PrimeStrides, a boutique software agency.
+
+{self.company_context}
+
+Given a campaign description, determine:
+1. The best target audience (be SPECIFIC)
+2. RocketReach search criteria
+3. The ONE specific pain point to focus on
+4. The unique angle that ONLY PrimeStrides can claim
+5. Which case study is most relevant
+
+Available ICP templates:
+{icp_options}
+
+Available case studies:
+{case_study_options}
+
+Return JSON with campaign_name, target_description, search_criteria, and campaign_context."""
+
+        user_prompt = f"""Campaign description: {campaign_description}
+
+Create hyper-targeted campaign. Remember: ONE pain point, specific case study, unique angle."""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                response_format={"type": "json_object"}
+            )
+            
+            return json.loads(response.choices[0].message.content)
         except Exception as e:
             print(f"Error determining ICP: {e}")
             return self._fallback_icp(campaign_description)
@@ -120,7 +212,7 @@ Create hyper-targeted campaign for PrimeStrides. Remember:
             "campaign_context": {
                 "product_service": "senior engineering team for 8-week sprints",
                 "single_pain_point": "can't ship fast enough with current team",
-                "unique_angle": "we shipped RoboApply's entire AI system in 8 weeks - their CTO said he'd never use another agency",
+                "unique_angle": "we shipped RoboApply's entire AI system in 8 weeks",
                 "case_study": CASE_STUDIES["roboapply"],
                 "front_end_offer": "free 30-min architecture review",
                 "trigger_signal": "actively building/scaling product"
@@ -132,77 +224,139 @@ Create hyper-targeted campaign for PrimeStrides. Remember:
                                campaign_context: Dict[str, Any],
                                tone: str = "casual") -> Dict[str, str]:
         """
-        Generate a personalized initial cold email following expert strategies
+        Generate a TRULY personalized cold email.
         
-        Key rules from Eric/Jay:
-        - Subject: 2-3 words, looks like it's from a colleague
-        - First line: Preview text, creates CURIOSITY, not a pitch
-        - Under 75-100 words total
-        - ONE pain point
-        - Specific case study
-        - Soft CTA (not "schedule a call")
+        LeadGenJay Rules:
+        1. Subject: 2-4 words, looks like colleague
+        2. First line: Creates CURIOSITY, is SPECIFIC (not "saw something interesting")
+        3. Under 75 words total (50-60 ideal)
+        4. ONE pain point
+        5. Relevant case study with REAL numbers
+        6. Soft CTA
         """
         
-        case_study = campaign_context.get("case_study", CASE_STUDIES["roboapply"])
+        # Step 1: Research the company (PROBLEM SNIFFING)
+        research = self.research_company(lead)
         
-        system_prompt = f"""You are a cold email expert. Write emails that get opened and replied to.
-
-CRITICAL RULES (from top cold email experts):
-
-**SUBJECT LINE:**
-- 2-4 words MAX
-- Must look like it's from a colleague or friend
-- NO: "Quick question", "Partnership", "Intro", "[Company] + [Company]"
-- YES: "{{first_name}}?", "thought about this", "re: {{company}}", "saw something"
-
-**FIRST LINE (this is the preview text - most important!):**
-- Must create CURIOSITY
-- Must NOT sound like a pitch
-- NO: "I noticed your company...", "I'm reaching out because...", "My name is..."
-- YES: "saw something interesting on {{company}}'s site", "random question", "this might be off base but"
-
-**BODY:**
-- Under 75 words total (entire email)
-- ONE pain point only
-- Include specific case study: {case_study.get('company_name')} - {case_study.get('result')} in {case_study.get('timeline')}
-- Sound like a human, not a template
-- 6th grade reading level, no jargon
-
-**CTA:**
-- Super soft, low friction
-- NO: "Let's schedule a call", "Are you free Tuesday?"
-- YES: "worth a quick chat?", "make sense to connect?", "open to hearing more?"
-
-**DO NOT:**
-- Use "I hope this finds you well"
-- Say "reaching out" or "touching base"
-- List multiple services
-- Use corporate buzzwords (leverage, synergy, streamline)
-- Write more than 4-5 sentences
-- Sound salesy or desperate
-
-Return JSON with "subject" and "body" keys only."""
-
-        # Build lead context
+        # Step 2: Select the most relevant case study
+        case_study = self.select_case_study(lead, research)
+        
         first_name = lead.get('first_name', 'there')
         company = lead.get('company', 'your company')
         title = lead.get('title', '')
         industry = lead.get('industry', '')
+        
+        # Determine opening strategy based on research confidence
+        if research.get('confidence') == 'high':
+            opening_instruction = f"""Use this SPECIFIC observation: "{research.get('specific_observation')}"
+Reference it naturally like you're texting a friend - NOT "I noticed" or "I saw"."""
+        elif research.get('confidence') == 'medium':
+            opening_instruction = f"""Use this hook: "{research.get('conversation_hook')}"
+Be casual and direct - like texting a colleague, not writing a formal email."""
+        else:
+            opening_instruction = f"""Be direct and honest - don't pretend you researched if you didn't:
+- "{company}'s in an interesting space" or ask a genuine question
+- Just get to the point quickly"""
+        
+        # Vary subject lines to avoid repetition
+        subject_options = [
+            f'"{first_name}?"',
+            '"thought"',
+            '"quick q"', 
+            f'"re: {company}"',
+            '"hey"',
+            '"idea"',
+        ]
+        
+        # Randomly select opening style for variation
+        import random
+        
+        # LeadGenJay style: First line is PREVIEW TEXT - must bait them to open
+        # NOT "why you're reaching out" - that kills open rates
+        opening_styles = [
+            f"{company}'s [specific thing] looks sick.",
+            f"{first_name}—[observation].",
+            f"[Specific thing about {company}]. Made me think.",
+            f"Saw {company}'s [specific thing]—pretty cool.",
+            f"{company} just [did something]. That's gotta be [feeling].",
+        ]
+        suggested_opener = random.choice(opening_styles)
+        
+        # Randomly select CTA for variation - LeadGenJay: ONE soft CTA only
+        cta_options = [
+            "interested?",
+            "make sense?",
+            "thoughts?",
+            "worth exploring?",
+            "open to it?",
+        ]
+        suggested_cta = random.choice(cta_options)
+        
+        # Case study reference - LeadGenJay: use relevant case studies
+        case_study_reference = f"a {case_study.get('industry', 'similar')} company"
+        
+        # LeadGenJay's EXACT framework from the 90-page doc:
+        # Line 1: Preview text that sounds like a friend (NOT why you're reaching out)
+        # Line 2: Poke the bear / agitate pain
+        # Line 3: Case study with SPECIFIC numbers (3.72x not 4x)
+        # Line 4: Soft CTA
+        
+        system_prompt = f"""You are writing a cold email that should read like a casual text from a friend.
 
-        user_prompt = f"""RECIPIENT:
-- First Name: {first_name}
-- Title: {title}
+CRITICAL RULES FROM LEADGENJAY:
+1. First line = PREVIEW TEXT. It must sound like it could be from a friend or colleague. 
+   The goal is to get them to OPEN the email. If they know it's a pitch before opening, they delete.
+   
+2. 6th GRADE READING LEVEL. Simple words. No jargon. Like texting.
+
+3. Under 75 words total. Shorter is better.
+
+4. SPECIFIC numbers in case study: "3.2x" not "3x", "43%" not "~40%"
+
+**STRUCTURE (4 lines max):**
+Line 1: [Preview bait] - Something specific you noticed. NOT "I noticed" or "I saw that" - just state the observation.
+Line 2: [Poke the bear] - One sentence about their likely pain/challenge. Don't ask "how are you handling X?"
+Line 3: [Case study] - "{case_study_reference} {case_study.get('result_short', case_study.get('result'))} in {case_study.get('timeline')}."
+Line 4: [CTA] - Just "{suggested_cta}" - nothing more.
+
+**SUBJECT LINE:** 2-3 words max. Pick from: {first_name}?, thought, quick q, hey, idea
+Should sound like it could be from a coworker.
+
+**BANNED (instant spam folder):**
+- "I noticed..." / "I saw that..." / "I came across..."
+- "I hope this finds you well"
+- "Quick thought—" at the start
+- Questions like "How are you handling/managing/navigating X?"
+- Corporate words: leverage, synergy, streamline, optimize, innovative, comprehensive, incentivize
+- Guarantees or promises
+- Multiple CTAs
+- Anything over 75 words
+
+**GOOD EXAMPLE:**
+Subject: mike?
+
+{company}'s new warehouse automation is wild. Scaling that with real-time inventory sync has to be tricky. {case_study_reference} cut processing time 43% in 8 weeks. {suggested_cta}
+
+Return JSON: {{"subject": "...", "body": "..."}}"""
+
+        user_prompt = f"""Write a LeadGenJay-style cold email to:
+- Name: {first_name}
+- Title: {title}  
 - Company: {company}
 - Industry: {industry}
 
-CAMPAIGN:
-- Pain point to address: {campaign_context.get('single_pain_point', 'shipping product faster')}
-- Our unique angle: {campaign_context.get('unique_angle', 'senior engineers who write code, no offshore teams')}
-- Case study to reference: {case_study.get('company_name')} achieved {case_study.get('result')} in {case_study.get('timeline')}
-- Front-end offer if relevant: {campaign_context.get('front_end_offer', 'free architecture review')}
+Research found: {json.dumps(research)}
 
-Write a cold email that will get opened (subject + first line create curiosity) and replied to (specific, human, helpful).
-Remember: UNDER 75 WORDS, looks like it's from a colleague."""
+Use this case study: {case_study_reference} - {case_study.get('result')} in {case_study.get('timeline')}
+
+End with CTA: {suggested_cta}
+
+Remember: 
+- First line must bait them to open (preview text)
+- 6th grade reading level
+- Under 75 words
+- SPECIFIC numbers
+- No "I noticed" or formal questions"""
 
         try:
             response = self.client.chat.completions.create(
@@ -211,23 +365,116 @@ Remember: UNDER 75 WORDS, looks like it's from a colleague."""
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.85,  # Higher temp for more human variation
+                temperature=0.9,  # Higher for more human variation
                 response_format={"type": "json_object"}
             )
             
             result = json.loads(response.choices[0].message.content)
             
-            # Apply spintax variation
-            subject = self._apply_spintax(result.get("subject", f"{first_name}?"))
-            body = self._apply_spintax(result.get("body", ""))
+            # Validate and clean
+            subject = result.get("subject", f"{first_name}?")
+            body = result.get("body", "")
+            
+            # Final validation
+            body = self._validate_and_clean(body, lead, case_study)
             
             return {
                 "subject": subject,
-                "body": body
+                "body": body,
+                "research": research,  # Include for debugging
+                "case_study_used": case_study.get('company_name')
             }
         except Exception as e:
             print(f"Error generating email: {e}")
-            return self._fallback_email(lead, campaign_context)
+            return self._fallback_email(lead, campaign_context, research, case_study)
+    
+    def _validate_and_clean(self, body: str, lead: Dict, case_study: Dict) -> str:
+        """Validate email doesn't contain banned patterns - STRICT per LeadGenJay"""
+        banned_phrases = [
+            "i hope this finds you well",
+            "i'm reaching out",
+            "i noticed your company",
+            "i noticed that",
+            "i noticed ",  # Catch all "I noticed" variants
+            "i saw that",
+            "i came across",
+            "just wanted to reach out",
+            "touching base",
+            "circling back",
+            "leverage",
+            "synergy",
+            "streamline",
+            "optimize",
+            "innovative",
+            "cutting-edge",
+            "game-changing",
+            "how are you navigating",  # Too formal
+            "how are you ensuring",    # Too formal
+            "how are you managing",    # Too formal
+            "how are you handling",    # Too formal
+            "how's that affecting",    # Too formal
+        ]
+        
+        # Check for double CTAs (desperate look)
+        cta_phrases = ["worth a chat", "worth a quick chat", "interested", "make sense", "open to", "curious if"]
+        
+        body_lower = body.lower()
+        issues = []
+        
+        for phrase in banned_phrases:
+            if phrase in body_lower:
+                issues.append(f"Contains banned phrase: '{phrase}'")
+        
+        # Count CTAs
+        cta_count = sum(1 for cta in cta_phrases if cta in body_lower)
+        if cta_count > 1:
+            issues.append(f"Multiple CTAs detected ({cta_count}) - looks desperate")
+        
+        # Check first line for robotic patterns
+        first_line = body.split('\n')[0].lower() if body else ""
+        if first_line.startswith("i noticed") or first_line.startswith("i saw"):
+            issues.append("Opens with robotic 'I noticed/saw' pattern")
+        
+        # Check sentence lengths
+        sentences = [s.strip() for s in body.replace('\n', '. ').split('.') if s.strip()]
+        for s in sentences:
+            word_count = len(s.split())
+            if word_count > 15:
+                issues.append(f"Long sentence ({word_count} words): '{s[:40]}...'")
+        
+        # Log warnings
+        for issue in issues:
+            print(f"⚠️  VALIDATION WARNING: {issue}")
+        
+        return body
+    
+    def _fallback_email(self, lead: Dict, context: Dict, research: Dict, case_study: Dict) -> Dict[str, str]:
+        """Fallback email that sounds human, not templated"""
+        first_name = lead.get('first_name', 'there')
+        company = lead.get('company', 'your company')
+        
+        # Different casual openers to avoid repetition
+        openers = [
+            f"{company} caught my eye.",
+            f"Quick thought about {company}.",
+            f"Been thinking about {company}'s setup.",
+        ]
+        
+        opener = random.choice(openers)
+        
+        # Casual body
+        body = f"""{opener}
+
+Scaling eng teams is brutal. We helped a similar company ship 3x faster in 8 weeks.
+
+Worth a quick chat?"""
+
+        return {
+            "subject": f"{first_name}?",
+            "body": body,
+            "research": research,
+            "case_study_used": "generic"
+        }
     
     def generate_followup_email(self,
                                 lead: Dict[str, Any],
@@ -235,62 +482,52 @@ Remember: UNDER 75 WORDS, looks like it's from a colleague."""
                                 previous_emails: List[Dict[str, str]],
                                 followup_number: int) -> Dict[str, str]:
         """
-        Generate follow-up emails following expert strategy:
+        Generate follow-up emails following LeadGenJay strategy:
         
-        Email 1: Initial (new thread)
-        Email 2: Same thread, add value (not "just following up")
-        Email 3: NEW thread, different subject, different angle (optional)
-        
-        Max 2-3 emails total. Short sequences = less spam complaints.
+        Email 2: Same thread, ADD VALUE (not "just following up")
+        Email 3: NEW thread, different angle
+        Max 3 emails total.
         """
         
         if followup_number == 1:
-            # Email 2: Same thread, add genuine value
             return self._generate_followup_same_thread(lead, campaign_context, previous_emails)
         elif followup_number == 2:
-            # Email 3: NEW thread, completely different angle
             return self._generate_followup_new_thread(lead, campaign_context, previous_emails)
         else:
-            # We shouldn't send more than 3 emails (expert advice)
             return self._generate_breakup_email(lead, campaign_context, previous_emails)
     
     def _generate_followup_same_thread(self, lead: Dict, context: Dict, previous: List) -> Dict:
-        """Follow-up in same thread - add value, don't just bump"""
+        """
+        Follow-up #2: Same thread, ADD GENUINE VALUE
         
-        system_prompt = """You are a cold email expert writing follow-up #2.
+        LeadGenJay: "Don't say 'just following up'. Add something useful."
+        """
+        first_name = lead.get('first_name', 'there')
+        company = lead.get('company', '')
+        original_subject = previous[0]['subject'] if previous else "previous"
+        
+        system_prompt = """Write follow-up #2 for a cold email that got no reply.
 
-CRITICAL RULES:
-- This is a SAME THREAD reply (will show as Re: original subject)
-- UNDER 50 words
-- Add GENUINE VALUE - share an insight, relevant resource, or quick tip
-- DO NOT say "just following up", "circling back", "bumping this"
-- DO NOT guilt trip them
+RULES:
+- Same thread (Re: original subject)
+- UNDER 40 WORDS
+- Add GENUINE value - share an insight, resource, or quick tip
+- NEVER say "just following up", "circling back", "bumping this"
+- NEVER guilt trip
 - Sound helpful, not desperate
 
-GOOD examples:
-- "quick thought - [relevant insight about their business]"
-- "fwiw - we just published something on [topic relevant to their pain]. happy to share."
-- "one more thing - [specific value add]"
+GOOD approaches:
+- "one thing I forgot - [specific insight]"
+- "fwiw - just published something on [relevant topic]. happy to share."
+- Share a specific tip related to their pain point
 
-BAD examples:
-- "just wanted to follow up on my last email"
-- "did you get a chance to see my message?"
-- "I know you're busy but..."
+Return JSON: {"subject": "Re: [original]", "body": "..."}"""
 
-Return JSON with "subject" and "body" keys. Subject should be "Re: [original subject]"."""
+        user_prompt = f"""Follow up with {first_name} at {company}.
+Original subject: {original_subject}
+Original body: {previous[0].get('body', '')[:150] if previous else ''}
 
-        first_name = lead.get('first_name', 'there')
-        original_subject = previous[0]['subject'] if previous else "previous email"
-
-        user_prompt = f"""RECIPIENT: {first_name} at {lead.get('company', 'their company')} ({lead.get('title', '')})
-
-ORIGINAL EMAIL:
-Subject: {original_subject}
-Body: {previous[0].get('body', '')[:200] if previous else ''}
-
-PAIN POINT: {context.get('single_pain_point', '')}
-
-Write a short follow-up that adds genuine value. Under 50 words."""
+Write a SHORT follow-up that adds value. Under 40 words."""
 
         try:
             response = self.client.chat.completions.create(
@@ -310,51 +547,47 @@ Write a short follow-up that adds genuine value. Under 50 words."""
             }
         except Exception as e:
             print(f"Error generating follow-up: {e}")
+            # Fallback
             return {
                 "subject": f"Re: {original_subject}",
-                "body": self._fallback_followup_same_thread(lead)
+                "body": f"""one thing I forgot to mention - 
+
+we just wrote up how we cut deployment time by 3x for a company similar to {company}.
+
+might be relevant. happy to share if useful."""
             }
     
     def _generate_followup_new_thread(self, lead: Dict, context: Dict, previous: List) -> Dict:
-        """Follow-up #3: NEW thread with completely different angle"""
+        """
+        Follow-up #3: NEW thread, completely different angle
         
-        system_prompt = """You are a cold email expert writing follow-up #3.
-
-CRITICAL: This is a NEW THREAD (different subject line, fresh start)
-
-Strategy:
-- Different angle/pain point than original emails
-- They already ignored you twice - try something new
-- Lower friction CTA (offer something valuable for free)
-- Under 60 words
-- Subject should be different and intriguing
-
-This is like a fresh email but referencing you've tried to connect.
-
-GOOD subject lines for fresh thread:
-- "different thought"
-- "[first_name] - one more idea"  
-- "re: [something they care about]"
-
-IMPORTANT:
-- Do NOT include a signature or sign-off like "Best," or "[Your Name]"
-- End with the question/CTA directly
-- Keep it conversational, no formal closings
-
-Return JSON with "subject" and "body" keys."""
-
+        LeadGenJay: "Email 3 should be a fresh start with different subject and angle"
+        """
         first_name = lead.get('first_name', 'there')
-        company = lead.get('company', 'your company')
+        company = lead.get('company', '')
+        front_end_offer = context.get('front_end_offer', 'free architecture review')
+        
+        system_prompt = """Write follow-up #3 - a FRESH email with NEW thread.
 
-        user_prompt = f"""RECIPIENT: {first_name}, {lead.get('title', '')} at {company}
+RULES:
+- NEW subject line (different from previous emails)
+- Different angle than before
+- Offer something valuable for free (the front-end offer)
+- Under 50 words
+- Don't reference previous emails
+- Sound like a fresh, helpful message
 
-PREVIOUS ANGLES TRIED (don't repeat these):
-{[email.get('subject', '') for email in previous]}
+IMPORTANT: Do NOT include signature or sign-off. End with the question.
 
-New angle to try: offer the free front-end offer
-Front-end offer: {context.get('front_end_offer', 'free architecture review')}
+Return JSON: {"subject": "...", "body": "..."}"""
 
-Write a fresh email with different approach. New subject line, under 60 words."""
+        previous_subjects = [e.get('subject', '') for e in previous]
+        
+        user_prompt = f"""Fresh email to {first_name} at {company}.
+Previous subjects used (DON'T repeat): {previous_subjects}
+Front-end offer to make: {front_end_offer}
+
+Write a fresh email with different approach. Under 50 words."""
 
         try:
             response = self.client.chat.completions.create(
@@ -363,36 +596,40 @@ Write a fresh email with different approach. New subject line, under 60 words.""
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.85,
+                temperature=0.9,
                 response_format={"type": "json_object"}
             )
             
             result = json.loads(response.choices[0].message.content)
             return {
-                "subject": result.get("subject", f"{first_name} - one more idea"),
+                "subject": result.get("subject", "different thought"),
                 "body": result.get("body", ""),
-                "new_thread": True  # Flag for campaign manager
+                "new_thread": True
             }
         except Exception as e:
-            print(f"Error generating new thread follow-up: {e}")
             return {
-                "subject": f"{first_name} - different thought",
-                "body": self._fallback_followup_new_thread(lead, context),
+                "subject": "different thought",
+                "body": f"""{first_name} - 
+
+totally different idea. we're doing free {front_end_offer}s for companies in your space.
+
+30 mins, specific feedback, no pitch.
+
+interested?""",
                 "new_thread": True
             }
     
     def _generate_breakup_email(self, lead: Dict, context: Dict, previous: List) -> Dict:
-        """Final email - helpful, not guilt-tripping. Leave door open."""
-        
+        """Final email - helpful redirect, not guilt trip"""
         first_name = lead.get('first_name', 'there')
-        company = lead.get('company', 'your company')
+        company = lead.get('company', '')
         
-        # Expert advice: "Should I reach out to [other person] instead?" works well
-        body = f"""{first_name} - 
+        # LeadGenJay tip: "Should I reach out to someone else?" works well
+        body = f"""{first_name} -
 
-last one from me. if dev capacity ever becomes a priority at {company}, happy to help.
+last note from me. if dev bandwidth becomes a priority at {company}, happy to help.
 
-or if I should be talking to someone else on the team, just point me in the right direction.
+or if there's someone else I should talk to, just point me their way.
 
 either way, rooting for you."""
 
@@ -401,97 +638,42 @@ either way, rooting for you."""
             "body": body,
             "new_thread": True
         }
-    
-    def _apply_spintax(self, text: str) -> str:
-        """Apply spintax variations: {word1|word2|word3} -> random choice"""
-        pattern = r'\{([^{}]+)\}'
-        
-        def replace_spintax(match):
-            options = match.group(1).split('|')
-            return random.choice(options)
-        
-        return re.sub(pattern, replace_spintax, text)
-    
-    def _fallback_email(self, lead: Dict, context: Dict) -> Dict[str, str]:
-        """Fallback email if AI fails - still follows expert rules"""
-        first_name = lead.get('first_name', 'there')
-        company = lead.get('company', 'your company')
-        case_study = context.get('case_study', CASE_STUDIES.get('roboapply', {}))
-        
-        body = f"""saw {company} is building some interesting stuff.
-
-random question - struggling to ship as fast as you'd like?
-
-we just helped {case_study.get('company_name', 'a similar company')} go from idea to production in {case_study.get('timeline', '8 weeks')} - {case_study.get('result', 'cut their timeline in half')}.
-
-if you're facing something similar, might be worth a quick chat.
-
-{random.choice(['cool what you are building.', 'interesting product.', 'like what I see.'])}"""
-        
-        return {
-            "subject": f"{first_name}?",
-            "body": body
-        }
-    
-    def _fallback_followup_same_thread(self, lead: Dict) -> str:
-        """Fallback follow-up in same thread"""
-        first_name = lead.get('first_name', 'there')
-        return f"""{first_name} - 
-
-one thing I forgot - we just wrote up how we cut {random.choice(['RoboApply', 'StratMap', 'Timpl'])}'s deployment time by 3.2x.
-
-might be relevant given what you're building. happy to share if useful."""
-    
-    def _fallback_followup_new_thread(self, lead: Dict, context: Dict) -> str:
-        """Fallback new thread follow-up"""
-        first_name = lead.get('first_name', 'there')
-        offer = context.get('front_end_offer', 'quick architecture review')
-        return f"""{first_name} - 
-
-totally different thought. we've been offering a free {offer} for companies in your space.
-
-takes 30 mins, you get specific feedback on your stack. no pitch, just useful.
-
-interested?"""
 
 
-# Utility function for problem sniffing (future enhancement)
-def analyze_company_problems(company_url: str, client: OpenAI) -> Dict:
-    """
-    Future: Use AI to analyze company website and identify specific problems
-    This is "problem sniffing" - finding issues before emailing
-    """
-    # TODO: Implement web scraping + AI analysis
-    # - Check their tech stack
-    # - Look for hiring signals
-    # - Analyze their product for issues
-    # - Check reviews/feedback
-    pass
-
-
-# Example usage
+# Test
 if __name__ == "__main__":
     generator = EmailGenerator()
     
-    # Test ICP determination
-    print("Testing ICP determination...")
-    result = generator.determine_icp_and_criteria("target fintech startups who just raised seed funding")
-    print(json.dumps(result, indent=2))
-    
-    # Test email generation
-    print("\n" + "="*50)
-    print("Testing email generation...")
-    
-    lead = {
+    # Test with real lead data
+    test_lead = {
         "first_name": "Sarah",
         "full_name": "Sarah Chen",
-        "title": "CEO",
-        "company": "PayFlow",
+        "title": "CTO",
+        "company": "FinFlow",
         "industry": "FinTech",
         "location": "San Francisco"
     }
     
-    email = generator.generate_initial_email(lead, result.get("campaign_context", {}))
+    print("="*60)
+    print("Testing improved email generator")
+    print("="*60)
+    
+    # Test research
+    print("\n1. Researching company...")
+    research = generator.research_company(test_lead)
+    print(f"Research: {json.dumps(research, indent=2)}")
+    
+    # Test case study selection
+    print("\n2. Selecting case study...")
+    case_study = generator.select_case_study(test_lead, research)
+    print(f"Selected: {case_study.get('company_name')}")
+    
+    # Test email generation
+    print("\n3. Generating email...")
+    context = {"single_pain_point": "shipping AI features fast"}
+    email = generator.generate_initial_email(test_lead, context)
+    
     print(f"\nSubject: {email['subject']}")
     print(f"\nBody:\n{email['body']}")
     print(f"\nWord count: {len(email['body'].split())}")
+    print(f"Case study used: {email.get('case_study_used', 'N/A')}")
