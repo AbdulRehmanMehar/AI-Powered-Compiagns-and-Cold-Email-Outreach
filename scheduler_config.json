@@ -1,0 +1,377 @@
+{
+  "scheduled_campaigns": [
+    {
+      "description": "Target startup founders building MVPs for SaaS products",
+      "schedule_time": "09:00",
+      "days": ["monday", "wednesday"],
+      "max_leads": 15,
+      "enabled": true
+    },
+    {
+      "description": "Target seed-stage founders who need production-ready MVP development",
+      "schedule_time": "09:30",
+      "days": ["tuesday", "thursday"],
+      "max_leads": 15,
+      "enabled": true
+    },
+    {
+      "description": "Target Series A founders scaling their first engineering team",
+      "schedule_time": "10:00",
+      "days": ["monday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target non-technical founders looking for technical product partners",
+      "schedule_time": "10:30",
+      "days": ["tuesday", "wednesday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target CTOs at SaaS companies facing scaling issues",
+      "schedule_time": "11:00",
+      "days": ["monday", "thursday"],
+      "max_leads": 15,
+      "enabled": true
+    },
+    {
+      "description": "Target Heads of Engineering modernizing legacy systems",
+      "schedule_time": "11:30",
+      "days": ["tuesday", "friday"],
+      "max_leads": 15,
+      "enabled": true
+    },
+    {
+      "description": "Target VP Engineering at B2B SaaS companies",
+      "schedule_time": "12:00",
+      "days": ["wednesday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target product leaders shipping new AI-powered features",
+      "schedule_time": "12:30",
+      "days": ["monday", "thursday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target Head of Product at startups launching new platforms",
+      "schedule_time": "13:00",
+      "days": ["tuesday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target CTOs integrating AI into production systems",
+      "schedule_time": "13:30",
+      "days": ["monday", "wednesday"],
+      "max_leads": 15,
+      "enabled": true
+    },
+
+    {
+      "description": "Target fintech founders building compliance-heavy platforms",
+      "schedule_time": "14:00",
+      "days": ["monday", "thursday"],
+      "max_leads": 10,
+      "enabled": true
+    },
+    {
+      "description": "Target healthtech startups building internal clinical tools",
+      "schedule_time": "14:30",
+      "days": ["tuesday", "friday"],
+      "max_leads": 10,
+      "enabled": true
+    },
+    {
+      "description": "Target AI startup founders building production ML systems",
+      "schedule_time": "15:00",
+      "days": ["wednesday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target CTOs migrating monoliths to modern architectures",
+      "schedule_time": "15:30",
+      "days": ["monday", "thursday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target founders building B2B SaaS dashboards and analytics tools",
+      "schedule_time": "16:00",
+      "days": ["tuesday", "wednesday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target data platform startups needing backend system design",
+      "schedule_time": "16:30",
+      "days": ["monday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target RevOps leaders needing internal automation systems",
+      "schedule_time": "17:00",
+      "days": ["tuesday", "thursday"],
+      "max_leads": 10,
+      "enabled": true
+    },
+    {
+      "description": "Target operations leaders replacing manual workflows with software",
+      "schedule_time": "09:00",
+      "days": ["wednesday", "friday"],
+      "max_leads": 10,
+      "enabled": true
+    },
+    {
+      "description": "Target marketplace founders building multi-tenant platforms",
+      "schedule_time": "09:30",
+      "days": ["monday", "thursday"],
+      "max_leads": 15,
+      "enabled": true
+    },
+    {
+      "description": "Target logistics startups modernizing internal tracking systems",
+      "schedule_time": "10:00",
+      "days": ["tuesday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+
+    {
+      "description": "Target SaaS founders rebuilding prototypes into production systems",
+      "schedule_time": "10:30",
+      "days": ["monday", "wednesday"],
+      "max_leads": 15,
+      "enabled": true
+    },
+    {
+      "description": "Target CTOs leading cloud migration projects",
+      "schedule_time": "11:00",
+      "days": ["tuesday", "thursday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target startups launching AI copilots for internal teams",
+      "schedule_time": "11:30",
+      "days": ["monday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target founders building developer tools and APIs",
+      "schedule_time": "12:00",
+      "days": ["wednesday", "thursday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target CTOs modernizing reporting and analytics pipelines",
+      "schedule_time": "12:30",
+      "days": ["tuesday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target product teams building onboarding automation systems",
+      "schedule_time": "13:00",
+      "days": ["monday", "wednesday"],
+      "max_leads": 10,
+      "enabled": true
+    },
+    {
+      "description": "Target SaaS founders integrating third-party APIs and systems",
+      "schedule_time": "13:30",
+      "days": ["tuesday", "thursday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target fintech CTOs modernizing payments infrastructure",
+      "schedule_time": "14:00",
+      "days": ["monday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target healthcare startups building HIPAA-compliant platforms",
+      "schedule_time": "14:30",
+      "days": ["wednesday", "thursday"],
+      "max_leads": 10,
+      "enabled": true
+    },
+    {
+      "description": "Target founders building internal admin and ops dashboards",
+      "schedule_time": "15:00",
+      "days": ["tuesday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+
+    {
+      "description": "Target CTOs needing senior engineers for special projects",
+      "schedule_time": "15:30",
+      "days": ["monday", "wednesday"],
+      "max_leads": 15,
+      "enabled": true
+    },
+    {
+      "description": "Target startups preparing technical due diligence for fundraising",
+      "schedule_time": "16:00",
+      "days": ["tuesday", "thursday"],
+      "max_leads": 10,
+      "enabled": true
+    },
+    {
+      "description": "Target founders building AI-powered internal knowledge systems",
+      "schedule_time": "16:30",
+      "days": ["monday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target SaaS CTOs replacing legacy CRMs and ERPs",
+      "schedule_time": "17:00",
+      "days": ["wednesday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target startups building scheduling and workflow automation tools",
+      "schedule_time": "09:00",
+      "days": ["tuesday", "thursday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target founders launching vertical SaaS products",
+      "schedule_time": "09:30",
+      "days": ["monday", "wednesday"],
+      "max_leads": 15,
+      "enabled": true
+    },
+    {
+      "description": "Target CTOs at marketplaces scaling backend infrastructure",
+      "schedule_time": "10:00",
+      "days": ["tuesday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target product leaders rolling out AI-driven personalization",
+      "schedule_time": "10:30",
+      "days": ["monday", "thursday"],
+      "max_leads": 10,
+      "enabled": true
+    },
+    {
+      "description": "Target founders building compliance-heavy B2B platforms",
+      "schedule_time": "11:00",
+      "days": ["wednesday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target CTOs leading system re-architecture initiatives",
+      "schedule_time": "11:30",
+      "days": ["tuesday", "thursday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+
+    {
+      "description": "Target SaaS founders building analytics and reporting platforms",
+      "schedule_time": "12:00",
+      "days": ["monday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target operations leaders automating internal approval workflows",
+      "schedule_time": "12:30",
+      "days": ["tuesday", "wednesday"],
+      "max_leads": 10,
+      "enabled": true
+    },
+    {
+      "description": "Target founders building customer support automation systems",
+      "schedule_time": "13:00",
+      "days": ["monday", "thursday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target CTOs integrating multiple SaaS systems",
+      "schedule_time": "13:30",
+      "days": ["tuesday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target startups replacing spreadsheets with internal tools",
+      "schedule_time": "14:00",
+      "days": ["wednesday", "thursday"],
+      "max_leads": 10,
+      "enabled": true
+    },
+    {
+      "description": "Target fintech founders building risk and compliance platforms",
+      "schedule_time": "14:30",
+      "days": ["monday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target SaaS CTOs implementing data pipelines and ETL systems",
+      "schedule_time": "15:00",
+      "days": ["tuesday", "wednesday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target product teams building feature flag and experimentation systems",
+      "schedule_time": "15:30",
+      "days": ["monday", "thursday"],
+      "max_leads": 10,
+      "enabled": true
+    },
+    {
+      "description": "Target founders building AI-powered recommendation engines",
+      "schedule_time": "16:00",
+      "days": ["tuesday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    },
+    {
+      "description": "Target CTOs stabilizing high-traffic production systems",
+      "schedule_time": "16:30",
+      "days": ["wednesday", "friday"],
+      "max_leads": 12,
+      "enabled": true
+    }
+  ],
+  "schedules": {
+    "followup_check": "10:30",
+    "initial_emails": "09:30"
+  },
+  "settings": {
+    "timezone": "Asia/Karachi",
+    "pause_weekends": true,
+    "max_emails_per_day_per_mailbox": 25,
+    "min_delay_minutes": 7,
+    "max_delay_minutes": 12
+  },
+  "expert_strategy_notes": {
+    "sequence_length": "Max 3 emails (1 initial + 2 follow-ups)",
+    "email_1": "Initial - create curiosity, under 75 words, soft CTA",
+    "email_2": "Day 3, same thread - add value, don't just bump, under 50 words",
+    "email_3": "Day 6, NEW thread - different angle, lower friction offer, under 60 words",
+    "subject_line": "2-4 words, looks like from colleague, NO 'quick question'",
+    "first_line": "Preview text - create curiosity, NOT a pitch"
+  }
+}
