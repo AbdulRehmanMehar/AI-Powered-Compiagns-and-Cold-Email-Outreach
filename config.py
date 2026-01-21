@@ -74,7 +74,9 @@ WARMUP_WEEK2_LIMIT = int(os.getenv("WARMUP_WEEK2_LIMIT", "7"))
 WARMUP_WEEK3_LIMIT = int(os.getenv("WARMUP_WEEK3_LIMIT", "12"))
 WARMUP_WEEK4_LIMIT = int(os.getenv("WARMUP_WEEK4_LIMIT", "20"))
 
-# Sending hours (send only during business hours to look natural)
-SENDING_HOUR_START = int(os.getenv("SENDING_HOUR_START", "8"))   # 8 AM
-SENDING_HOUR_END = int(os.getenv("SENDING_HOUR_END", "18"))      # 6 PM
+# Sending hours (US Eastern business hours: 9 AM - 5 PM)
+# Uses America/New_York timezone which auto-handles EST/EDT
+TARGET_TIMEZONE = os.getenv("TARGET_TIMEZONE", "America/New_York")
+SENDING_HOUR_START = int(os.getenv("SENDING_HOUR_START", "9"))    # 9 AM in target timezone
+SENDING_HOUR_END = int(os.getenv("SENDING_HOUR_END", "17"))       # 5 PM in target timezone
 SEND_ON_WEEKENDS = os.getenv("SEND_ON_WEEKENDS", "false").lower() == "true"

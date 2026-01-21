@@ -7,6 +7,7 @@ import config
 import time
 import random
 from datetime import datetime
+import pytz
 
 
 class ZohoEmailSender:
@@ -32,7 +33,8 @@ class ZohoEmailSender:
             4: config.WARMUP_WEEK4_LIMIT,  # Week 4+: normal
         }
         
-        # Sending hours
+        # Sending hours (in target timezone, e.g., America/New_York)
+        self.target_timezone = pytz.timezone(config.TARGET_TIMEZONE)
         self.send_hour_start = config.SENDING_HOUR_START
         self.send_hour_end = config.SENDING_HOUR_END
         self.send_on_weekends = config.SEND_ON_WEEKENDS
@@ -72,22 +74,25 @@ class ZohoEmailSender:
         return min(limit, self.emails_per_day)
     
     def _can_send_now(self) -> tuple[bool, str]:
-        """Check if we can send emails right now (time of day, day of week)"""
-        now = datetime.utcnow()
-        current_hour = now.hour
-        day_of_week = now.weekday()  # 0=Monday, 6=Sunday
+        """Check if we can send emails right now (time of day, day of week in target timezone)"""
+        # Get current time in target timezone (e.g., America/New_York)
+        now_utc = datetime.now(pytz.UTC)
+        now_target = now_utc.astimezone(self.target_timezone)
+        current_hour = now_target.hour
+        day_of_week = now_target.weekday()  # 0=Monday, 6=Sunday
+        tz_name = now_target.strftime('%Z')  # EST or EDT
         
         # Check weekend
         if day_of_week >= 5 and not self.send_on_weekends:
-            return False, "⏸️ Weekend - sending paused (set SEND_ON_WEEKENDS=true to override)"
+            return False, f"⏸️ Weekend in {tz_name} - sending paused"
         
         # Check business hours
         if current_hour < self.send_hour_start:
-            return False, f"⏸️ Too early ({current_hour}:00) - sending starts at {self.send_hour_start}:00"
+            return False, f"⏸️ Too early ({current_hour}:00 {tz_name}) - starts at {self.send_hour_start}:00"
         if current_hour >= self.send_hour_end:
-            return False, f"⏸️ Too late ({current_hour}:00) - sending ended at {self.send_hour_end}:00"
+            return False, f"⏸️ Too late ({current_hour}:00 {tz_name}) - ended at {self.send_hour_end}:00"
         
-        return True, "✅ Within sending hours"
+        return True, f"✅ Within sending hours ({current_hour}:00 {tz_name})"
     
     def _can_account_send(self, account_email: str) -> tuple[bool, str, int]:
         """Check if a specific account can send more emails today"""
