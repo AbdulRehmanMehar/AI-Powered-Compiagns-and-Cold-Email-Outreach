@@ -8,9 +8,6 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    volumes:
-      # Mount config file for easy updates without rebuild
-      - ./scheduler_config.json:/app/scheduler_config.json:ro
     environment:
       - TZ=Asia/Karachi
       - PYTHONUNBUFFERED=1
