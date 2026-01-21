@@ -1,0 +1,33 @@
+{
+  "scheduled_campaigns": [
+    {
+      "description": "Target healthcare and medical technology companies that need software development",
+      "schedule_time": "09:00",
+      "days": ["monday", "wednesday", "friday"],
+      "max_leads": 15,
+      "enabled": true
+    },
+    {
+      "description": "Target fintech startups looking to build mobile apps or web platforms",
+      "schedule_time": "10:00",
+      "days": ["tuesday", "thursday"],
+      "max_leads": 15,
+      "enabled": true
+    },
+    {
+      "description": "Target e-commerce businesses that need custom software or integrations",
+      "schedule_time": "14:00",
+      "days": ["monday", "thursday"],
+      "max_leads": 10,
+      "enabled": true
+    }
+  ],
+  "schedules": {
+    "followups": "11:00",
+    "initial_emails": "09:30"
+  },
+  "settings": {
+    "timezone": "Asia/Karachi",
+    "pause_weekends": true
+  }
+}

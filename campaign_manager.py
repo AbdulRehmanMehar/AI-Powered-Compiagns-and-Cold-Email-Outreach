@@ -1,0 +1,515 @@
+from typing import Dict, Any, List, Optional
+from datetime import datetime, timedelta
+import time
+import random
+
+from database import Lead, Email, Campaign
+from rocketreach_client import RocketReachClient
+from email_generator import EmailGenerator
+from zoho_sender import ZohoEmailSender, text_to_html
+import config
+
+
+def get_random_delay() -> int:
+    """Get random delay between emails in seconds (from config)"""
+    min_delay = config.MIN_DELAY_BETWEEN_EMAILS * 60  # Convert to seconds
+    max_delay = config.MAX_DELAY_BETWEEN_EMAILS * 60
+    return random.randint(min_delay, max_delay)
+
+
+class CampaignManager:
+    """Orchestrates the entire cold email campaign"""
+    
+    def __init__(self):
+        self.rocketreach = RocketReachClient()
+        self.email_generator = EmailGenerator()
+        self.email_sender = ZohoEmailSender()
+    
+    def create_campaign(self,
+                        name: str,
+                        description: str,
+                        target_criteria: Dict[str, Any],
+                        campaign_context: Dict[str, Any]) -> str:
+        """
+        Create a new campaign
+        
+        Args:
+            name: Campaign name
+            description: Campaign description
+            target_criteria: RocketReach search criteria
+            campaign_context: Context for email generation (product_service, value_proposition, etc.)
+        
+        Returns:
+            Campaign ID
+        """
+        campaign_id = Campaign.create(
+            name=name,
+            description=description,
+            target_criteria={
+                **target_criteria,
+                "campaign_context": campaign_context
+            }
+        )
+        
+        print(f"Created campaign: {name} (ID: {campaign_id})")
+        return campaign_id
+    
+    def fetch_leads_for_campaign(self,
+                                  campaign_id: str,
+                                  max_leads: int = 50) -> List[Dict]:
+        """
+        Fetch leads from RocketReach for a campaign
+        
+        Args:
+            campaign_id: Campaign ID
+            max_leads: Maximum number of leads to fetch
+        
+        Returns:
+            List of lead dicts
+        """
+        campaign = Campaign.get_by_id(campaign_id)
+        if not campaign:
+            raise ValueError(f"Campaign not found: {campaign_id}")
+        
+        criteria = campaign.get("target_criteria", {})
+        
+        print(f"Fetching leads for campaign: {campaign['name']}")
+        print(f"Criteria: {criteria}")
+        
+        # Get already-contacted emails to exclude
+        contacted_emails = Email.get_contacted_emails()
+        print(f"   Excluding {len(contacted_emails)} already-contacted emails")
+        
+        # Fetch from RocketReach (pass exclude list to skip at source)
+        raw_leads = self.rocketreach.fetch_leads(criteria, max_leads, exclude_emails=contacted_emails)
+        
+        # Save to database
+        saved_leads = []
+        for lead_data in raw_leads:
+            email = lead_data.get("email")
+            if email:
+                lead_id = Lead.create(lead_data)
+                lead = Lead.get_by_id(lead_id)
+                saved_leads.append(lead)
+        
+        # Update campaign stats
+        Campaign.increment_stat(campaign_id, "total_leads", len(saved_leads))
+        
+        print(f"Fetched and saved {len(saved_leads)} leads")
+        return saved_leads
+    
+    def send_initial_emails(self,
+                            campaign_id: str,
+                            leads: List[Dict] = None,
+                            dry_run: bool = False) -> Dict[str, Any]:
+        """
+        Send initial emails to leads in a campaign
+        
+        Args:
+            campaign_id: Campaign ID
+            leads: List of leads (if None, fetches all leads for campaign)
+            dry_run: If True, generate emails but don't send
+        
+        Returns:
+            Results summary
+        """
+        campaign = Campaign.get_by_id(campaign_id)
+        if not campaign:
+            raise ValueError(f"Campaign not found: {campaign_id}")
+        
+        campaign_context = campaign.get("target_criteria", {}).get("campaign_context", {})
+        
+        if leads is None:
+            leads = Lead.get_all()
+        
+        results = {
+            "total": len(leads),
+            "sent": 0,
+            "failed": 0,
+            "skipped": 0,
+            "skipped_limit": 0,
+            "skipped_time": 0,
+            "details": []
+        }
+        
+        # Connect to SMTP server
+        if not dry_run:
+            if not self.email_sender.connect():
+                return {"error": "Failed to connect to email server"}
+        
+        try:
+            for lead in leads:
+                lead_id = str(lead["_id"])
+                
+                # Check if we already sent to this lead in this campaign
+                existing_emails = Email.get_by_lead_and_campaign(lead_id, campaign_id)
+                if existing_emails:
+                    print(f"Skipping {lead['email']} - already emailed")
+                    results["skipped"] += 1
+                    continue
+                
+                # Generate personalized email
+                print(f"Generating email for {lead['full_name']} ({lead['email']})...")
+                email_content = self.email_generator.generate_initial_email(
+                    lead=lead,
+                    campaign_context=campaign_context
+                )
+                
+                # Create email record
+                email_id = Email.create(
+                    lead_id=lead_id,
+                    campaign_id=campaign_id,
+                    subject=email_content["subject"],
+                    body=email_content["body"],
+                    email_type="initial",
+                    followup_number=0
+                )
+                
+                if dry_run:
+                    print(f"[DRY RUN] Would send to {lead['email']}:")
+                    print(f"  Subject: {email_content['subject']}")
+                    results["sent"] += 1
+                    results["details"].append({
+                        "lead_email": lead["email"],
+                        "subject": email_content["subject"],
+                        "status": "dry_run"
+                    })
+                else:
+                    # Send the email
+                    result = self.email_sender.send_email(
+                        to_email=lead["email"],
+                        subject=email_content["subject"],
+                        body=email_content["body"],
+                        to_name=lead.get("full_name"),
+                        html_body=text_to_html(email_content["body"])
+                    )
+                    
+                    # Check if we hit limits or time restrictions
+                    if not result["success"]:
+                        skip_reason = result.get("skip_reason")
+                        
+                        if skip_reason == "limit":
+                            print(f"   🛑 Daily limit reached - stopping campaign for today")
+                            results["skipped_limit"] += 1
+                            # Don't mark as failed - we'll retry tomorrow
+                            # Delete the pending email record
+                            from database import emails_collection
+                            from bson import ObjectId
+                            emails_collection.delete_one({"_id": ObjectId(email_id)})
+                            break  # Stop the campaign for today
+                        
+                        elif skip_reason == "time":
+                            print(f"   ⏸️ Outside sending hours - stopping campaign")
+                            results["skipped_time"] += 1
+                            # Delete the pending email record
+                            from database import emails_collection
+                            from bson import ObjectId
+                            emails_collection.delete_one({"_id": ObjectId(email_id)})
+                            break  # Stop the campaign
+                        
+                        else:
+                            # Actual send failure
+                            Email.mark_failed(email_id, result.get("error", "Unknown error"))
+                            results["failed"] += 1
+                            results["details"].append({
+                                "lead_email": lead["email"],
+                                "subject": email_content["subject"],
+                                "status": "failed",
+                                "error": result.get("error")
+                            })
+                    else:
+                        Email.mark_sent(email_id)
+                        Campaign.increment_stat(campaign_id, "emails_sent")
+                        results["sent"] += 1
+                        results["details"].append({
+                            "lead_email": lead["email"],
+                            "subject": email_content["subject"],
+                            "status": "sent"
+                        })
+                    
+                    # Rate limiting - use config-based delay (20-35 min by default)
+                    if results["sent"] < len(leads):  # Don't delay after last email
+                        delay = get_random_delay()
+                        print(f"   ⏳ Waiting {delay // 60}m {delay % 60}s before next email...")
+                        time.sleep(delay)
+        
+        finally:
+            if not dry_run:
+                self.email_sender.disconnect()
+        
+        # Activate campaign if not already active
+        if campaign["status"] == Campaign.STATUS_DRAFT:
+            Campaign.update_status(campaign_id, Campaign.STATUS_ACTIVE)
+        
+        print(f"\nResults: Sent {results['sent']}, Failed {results['failed']}, Skipped {results['skipped']}")
+        return results
+    
+    def send_followup_emails(self,
+                             campaign_id: str,
+                             dry_run: bool = False) -> Dict[str, Any]:
+        """
+        Send follow-up emails following expert strategy:
+        - Email 2 (followup_number=1): Same thread, add value, Day 3
+        - Email 3 (followup_number=2): NEW thread, different angle, Day 6
+        
+        Max 2 follow-ups (3 total emails) per expert advice - shorter sequences = less spam
+        
+        Args:
+            campaign_id: Campaign ID
+            dry_run: If True, generate emails but don't send
+        
+        Returns:
+            Results summary
+        """
+        campaign = Campaign.get_by_id(campaign_id)
+        if not campaign:
+            raise ValueError(f"Campaign not found: {campaign_id}")
+        
+        campaign_context = campaign.get("target_criteria", {}).get("campaign_context", {})
+        
+        # Get leads needing follow-up with proper delay handling
+        pending_followups = Email.get_pending_followups(
+            campaign_id,
+            config.FOLLOWUP_DELAY_DAYS
+        )
+        
+        results = {
+            "total": len(pending_followups),
+            "sent": 0,
+            "failed": 0,
+            "skipped_max_reached": 0,
+            "details": []
+        }
+        
+        if not pending_followups:
+            print("No follow-ups needed at this time")
+            return results
+        
+        print(f"Found {len(pending_followups)} leads needing follow-up")
+        
+        # Connect to SMTP server
+        if not dry_run:
+            if not self.email_sender.connect():
+                return {"error": "Failed to connect to email server"}
+        
+        try:
+            for followup_data in pending_followups:
+                lead_id = str(followup_data["_id"])
+                lead = Lead.get_by_id(lead_id)
+                
+                if not lead:
+                    continue
+                
+                # Get previous emails for context
+                previous_emails = Email.get_by_lead_and_campaign(lead_id, campaign_id)
+                previous_content = [
+                    {"subject": e["subject"], "body": e["body"]}
+                    for e in previous_emails
+                ]
+                
+                followup_number = len(previous_emails)
+                
+                # Expert advice: Max 2 follow-ups (3 total emails)
+                if followup_number > config.MAX_FOLLOWUPS:
+                    results["skipped_max_reached"] += 1
+                    continue
+                
+                # Generate follow-up email (handles same thread vs new thread internally)
+                print(f"Generating follow-up #{followup_number} for {lead['full_name']}...")
+                email_content = self.email_generator.generate_followup_email(
+                    lead=lead,
+                    campaign_context=campaign_context,
+                    previous_emails=previous_content,
+                    followup_number=followup_number
+                )
+                
+                # Check if this is a new thread (follow-up #2/email #3)
+                is_new_thread = email_content.get("new_thread", False)
+                if is_new_thread:
+                    print(f"  → Starting NEW thread (different angle)")
+                
+                # Create email record
+                email_id = Email.create(
+                    lead_id=lead_id,
+                    campaign_id=campaign_id,
+                    subject=email_content["subject"],
+                    body=email_content["body"],
+                    email_type="followup" if not is_new_thread else "followup_new_thread",
+                    followup_number=followup_number
+                )
+                
+                if dry_run:
+                    print(f"[DRY RUN] Would send follow-up to {lead['email']}:")
+                    print(f"  Subject: {email_content['subject']}")
+                    results["sent"] += 1
+                else:
+                    # Send the email
+                    result = self.email_sender.send_email(
+                        to_email=lead["email"],
+                        subject=email_content["subject"],
+                        body=email_content["body"],
+                        to_name=lead.get("full_name"),
+                        html_body=text_to_html(email_content["body"])
+                    )
+                    
+                    if result["success"]:
+                        Email.mark_sent(email_id)
+                        Campaign.increment_stat(campaign_id, "emails_sent")
+                        results["sent"] += 1
+                        results["details"].append({
+                            "lead_email": lead["email"],
+                            "followup_number": followup_number,
+                            "status": "sent"
+                        })
+                    else:
+                        # Check if we hit limits or time restrictions
+                        skip_reason = result.get("skip_reason")
+                        
+                        if skip_reason == "limit":
+                            print(f"   🛑 Daily limit reached - stopping follow-ups for today")
+                            results["skipped_limit"] = results.get("skipped_limit", 0) + 1
+                            # Delete the pending email record
+                            from database import emails_collection
+                            from bson import ObjectId
+                            emails_collection.delete_one({"_id": ObjectId(email_id)})
+                            break
+                        
+                        elif skip_reason == "time":
+                            print(f"   ⏸️ Outside sending hours - stopping follow-ups")
+                            results["skipped_time"] = results.get("skipped_time", 0) + 1
+                            from database import emails_collection
+                            from bson import ObjectId
+                            emails_collection.delete_one({"_id": ObjectId(email_id)})
+                            break
+                        
+                        else:
+                            Email.mark_failed(email_id, result.get("error", "Unknown error"))
+                            results["failed"] += 1
+                            results["details"].append({
+                                "lead_email": lead["email"],
+                                "followup_number": followup_number,
+                                "status": "failed",
+                                "error": result.get("error")
+                            })
+                    
+                    # Rate limiting - use config-based delay
+                    delay = get_random_delay()
+                    print(f"   ⏳ Waiting {delay // 60}m {delay % 60}s before next email...")
+                    time.sleep(delay)
+        
+        finally:
+            if not dry_run:
+                self.email_sender.disconnect()
+        
+        print(f"\nFollow-up Results: Sent {results['sent']}, Failed {results['failed']}")
+        return results
+    
+    def run_campaign(self,
+                     campaign_id: str,
+                     fetch_new_leads: bool = True,
+                     max_leads: int = 50,
+                     send_initial: bool = True,
+                     send_followups: bool = True,
+                     dry_run: bool = False) -> Dict[str, Any]:
+        """
+        Run a complete campaign cycle
+        
+        Args:
+            campaign_id: Campaign ID
+            fetch_new_leads: Whether to fetch new leads from RocketReach
+            max_leads: Maximum leads to fetch
+            send_initial: Whether to send initial emails
+            send_followups: Whether to send follow-up emails
+            dry_run: If True, don't actually send emails
+        
+        Returns:
+            Combined results
+        """
+        # Check if we can send before starting
+        status = self.email_sender.get_sending_status()
+        if not status["can_send_now"] and not dry_run:
+            print(f"⏸️ {status['time_reason']}")
+            return {
+                "campaign_id": campaign_id,
+                "skipped": True,
+                "reason": status["time_reason"]
+            }
+        
+        if status["total_remaining"] == 0 and not dry_run:
+            print("🛑 All accounts have reached their daily limits")
+            return {
+                "campaign_id": campaign_id,
+                "skipped": True,
+                "reason": "All accounts at daily limit"
+            }
+        
+        results = {
+            "campaign_id": campaign_id,
+            "leads_fetched": 0,
+            "initial_emails": {},
+            "followup_emails": {},
+            "remaining_capacity": status["total_remaining"]
+        }
+        
+        # Fetch new leads
+        if fetch_new_leads:
+            leads = self.fetch_leads_for_campaign(campaign_id, max_leads)
+            results["leads_fetched"] = len(leads)
+        
+        # Send initial emails (delay is now handled internally using config)
+        if send_initial:
+            results["initial_emails"] = self.send_initial_emails(
+                campaign_id,
+                dry_run=dry_run
+            )
+        
+        # Send follow-ups (delay is now handled internally using config)
+        if send_followups:
+            results["followup_emails"] = self.send_followup_emails(
+                campaign_id,
+                dry_run=dry_run
+            )
+        
+        return results
+    
+    def get_campaign_stats(self, campaign_id: str) -> Dict[str, Any]:
+        """Get statistics for a campaign"""
+        campaign = Campaign.get_by_id(campaign_id)
+        if not campaign:
+            return {"error": "Campaign not found"}
+        
+        return {
+            "name": campaign["name"],
+            "status": campaign["status"],
+            "created_at": campaign["created_at"],
+            "stats": campaign.get("stats", {})
+        }
+
+
+# Example usage
+if __name__ == "__main__":
+    manager = CampaignManager()
+    
+    # Example: Create a campaign
+    campaign_id = manager.create_campaign(
+        name="Tech Startup CEOs - Q1 2026",
+        description="Outreach to tech startup CEOs for Prime Strides services",
+        target_criteria={
+            "current_title": ["CEO", "Founder", "Co-Founder"],
+            "industry": ["Technology", "Software"],
+            "location": ["United States"]
+        },
+        campaign_context={
+            "product_service": "AI-powered growth marketing services",
+            "value_proposition": "help tech startups scale their customer acquisition by 3x in 90 days",
+            "company_name": "Prime Strides",
+            "call_to_action": "schedule a free 15-minute strategy call",
+            "sender_name": "The Prime Strides Team",
+            "additional_context": "We specialize in working with early-stage startups and have helped 50+ companies achieve product-market fit."
+        }
+    )
+    
+    print(f"\nCampaign created with ID: {campaign_id}")
+    print("\nTo run the campaign:")
+    print(f"  manager.run_campaign('{campaign_id}', dry_run=True)  # Test run")
+    print(f"  manager.run_campaign('{campaign_id}')  # Actual run")

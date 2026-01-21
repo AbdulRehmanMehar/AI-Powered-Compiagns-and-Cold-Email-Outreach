@@ -1,0 +1,44 @@
+services:
+  coldemails:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: primestrides/coldemails:latest
+    container_name: coldemails
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Mount config file for easy updates without rebuild
+      - ./scheduler_config.json:/app/scheduler_config.json:ro
+    environment:
+      - TZ=Asia/Karachi
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=${DATABASE_URL}
+      - OPENAI_API_KEY=${O_API_KEY}
+      - ROCKETREACH_API_KEY=${ROCKETREACH_API_KEY}
+      - ZOHO_EMAILS=${ZOHO_EMAILS}
+      - ZOHO_PASSWORDS=${ZOHO_PASSWORDS}
+      - ZOHO_SENDER_NAMES=${ZOHO_SENDER_NAMES}
+      - EMAIL_ROTATION_STRATEGY=${EMAIL_ROTATION_STRATEGY}
+      - EMAILS_PER_ACCOUNT=${EMAILS_PER_ACCOUNT}
+    healthcheck:
+      test: ["CMD", "python", "-c", "from database import campaigns_collection; print('healthy') if campaigns_collection.database.client.server_info() else exit(1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - app-network
+    labels:
+      - "com.docker.compose.project=coldemails"
+      - "io.portainer.accesscontrol.teams=operations"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  app-network:
+    driver: bridge
