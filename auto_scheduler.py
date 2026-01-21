@@ -9,12 +9,24 @@ import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable
 import threading
+import pytz
 
 from campaign_manager import CampaignManager
 from email_generator import EmailGenerator
 from reply_detector import ReplyDetector
 from database import Campaign, Email, campaigns_collection
 import config
+
+
+def get_target_time() -> datetime:
+    """Get current time in target timezone (US Eastern)"""
+    tz = pytz.timezone(config.TARGET_TIMEZONE)
+    return datetime.now(tz)
+
+
+def get_target_time_str(fmt: str = "%Y-%m-%d %H:%M %Z") -> str:
+    """Get formatted current time in target timezone"""
+    return get_target_time().strftime(fmt)
 
 
 class AutoScheduler:
@@ -72,12 +84,14 @@ class AutoScheduler:
         if not config.get("enabled"):
             return
         
-        today = datetime.now().strftime("%A").lower()
+        # Use target timezone for day check
+        now = get_target_time()
+        today = now.strftime("%A").lower()
         if today not in [d.lower() for d in config.get("days", [])]:
             return
         
         print(f"\n{'='*50}")
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] Running scheduled campaign")
+        print(f"[{get_target_time_str()}] Running scheduled campaign")
         print(f"   Description: {config['description']}")
         print(f"{'='*50}\n")
         
@@ -120,7 +134,7 @@ class AutoScheduler:
     
     def check_replies_task(self):
         """Task to check for replies across all accounts"""
-        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] 📬 Checking for replies...")
+        print(f"\n[{get_target_time_str()}] 📬 Checking for replies...")
         
         try:
             results = self.reply_detector.check_replies(since_days=1)
@@ -142,7 +156,7 @@ class AutoScheduler:
     
     def send_followups_task(self):
         """Task to send follow-up emails for all active campaigns"""
-        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] 📧 Checking for follow-ups...")
+        print(f"\n[{get_target_time_str()}] 📧 Checking for follow-ups...")
         
         active_campaigns = Campaign.get_active_campaigns()
         
@@ -175,7 +189,7 @@ class AutoScheduler:
     
     def send_initial_emails_task(self):
         """Task to send initial emails for draft campaigns"""
-        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] 📧 Sending initial emails for pending campaigns...")
+        print(f"\n[{get_target_time_str()}] 📧 Sending initial emails for pending campaigns...")
         
         # Find campaigns in draft status with leads but no emails sent
         draft_campaigns = list(campaigns_collection.find({
@@ -201,7 +215,7 @@ class AutoScheduler:
     
     def _run_missed_campaigns(self):
         """Run any campaigns that were scheduled earlier today but missed"""
-        now = datetime.now()
+        now = get_target_time()
         today = now.strftime("%A").lower()
         current_time = now.strftime("%H:%M")
         
@@ -246,9 +260,14 @@ class AutoScheduler:
             followup_check_interval_hours: How often to check for follow-ups
             initial_emails_interval_hours: How often to send pending initial emails
         """
+        target_tz = pytz.timezone(config.TARGET_TIMEZONE)
+        local_tz = datetime.now().astimezone().tzinfo or pytz.UTC
+        
         print("\n" + "="*60)
         print("🚀 AUTOMATED SCHEDULER STARTED")
         print("="*60)
+        print(f"\n🌍 Timezone: {config.TARGET_TIMEZONE}")
+        print(f"   Current time in target TZ: {get_target_time_str()}")
         print(f"\n📋 Schedule:")
         print(f"   • Check replies: Every {check_replies_interval_hours} hours")
         print(f"   • Send follow-ups: Every {followup_check_interval_hours} hours")
@@ -259,7 +278,7 @@ class AutoScheduler:
             for sc in self._scheduled_campaigns:
                 if sc['enabled']:
                     print(f"   • {sc['description']}")
-                    print(f"     → {sc['schedule_time']} on {', '.join(sc['days'])}")
+                    print(f"     → {sc['schedule_time']} {config.TARGET_TIMEZONE} on {', '.join(sc['days'])}")
                     print(f"     → Max {sc['max_leads']} leads per run")
         
         print(f"\n⏰ Press Ctrl+C to stop")
@@ -271,9 +290,26 @@ class AutoScheduler:
         schedule.every(initial_emails_interval_hours).hours.do(self.send_initial_emails_task)
         
         # Schedule campaign creation tasks
+        # Note: schedule library uses server local time, so we convert from target TZ
         for sc in self._scheduled_campaigns:
             if sc['enabled']:
-                schedule.every().day.at(sc['schedule_time']).do(
+                # Convert schedule time from target timezone to local server time
+                schedule_time_str = sc['schedule_time']  # e.g., "09:00"
+                hour, minute = map(int, schedule_time_str.split(':'))
+                
+                # Create a datetime in target timezone
+                today = datetime.now(target_tz).date()
+                target_dt = target_tz.localize(
+                    datetime(today.year, today.month, today.day, hour, minute)
+                )
+                
+                # Convert to local server time
+                local_dt = target_dt.astimezone(local_tz)
+                local_time_str = local_dt.strftime("%H:%M")
+                
+                print(f"📌 Scheduling '{sc['description'][:30]}...' at {schedule_time_str} EST (= {local_time_str} server time)")
+                
+                schedule.every().day.at(local_time_str).do(
                     self._run_scheduled_campaign, sc
                 )
         
