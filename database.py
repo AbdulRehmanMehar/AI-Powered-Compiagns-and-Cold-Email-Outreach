@@ -23,16 +23,24 @@ class Lead:
     @staticmethod
     def create(data: Dict[str, Any]) -> str:
         """Create or update a lead"""
+        # Extract first_name - try from data, or parse from full name
+        first_name = data.get("first_name")
+        full_name = data.get("name") or data.get("full_name") or ""
+        
+        # If first_name is None/empty but we have full_name, extract it
+        if not first_name and full_name:
+            first_name = full_name.split()[0] if full_name.split() else None
+        
         lead = {
             "email": data.get("email"),
-            "first_name": data.get("first_name"),
+            "first_name": first_name,
             "last_name": data.get("last_name"),
-            "full_name": data.get("name") or f"{data.get('first_name', '')} {data.get('last_name', '')}".strip(),
+            "full_name": full_name or f"{data.get('first_name') or ''} {data.get('last_name') or ''}".strip(),
             "title": data.get("current_title") or data.get("title"),
             "company": data.get("current_employer") or data.get("company"),
             "linkedin_url": data.get("linkedin_url"),
             "location": data.get("location"),
-            "industry": data.get("industry"),
+            "industry": data.get("industry") or data.get("current_employer_industry"),  # Fallback to employer industry
             "rocketreach_id": data.get("id"),
             "raw_data": data,
             "updated_at": datetime.utcnow(),
@@ -55,16 +63,44 @@ class Lead:
     
     @staticmethod
     def get_by_email(email: str) -> Optional[Dict]:
-        return leads_collection.find_one({"email": email})
+        lead = leads_collection.find_one({"email": email})
+        return Lead._normalize(lead) if lead else None
     
     @staticmethod
     def get_by_id(lead_id: str) -> Optional[Dict]:
         from bson import ObjectId
-        return leads_collection.find_one({"_id": ObjectId(lead_id)})
+        lead = leads_collection.find_one({"_id": ObjectId(lead_id)})
+        return Lead._normalize(lead) if lead else None
     
     @staticmethod
     def get_all() -> List[Dict]:
-        return list(leads_collection.find())
+        return [Lead._normalize(l) for l in leads_collection.find()]
+    
+    @staticmethod
+    def _normalize(lead: Dict) -> Dict:
+        """Ensure lead has all required fields with safe defaults (never None)"""
+        if not lead:
+            return lead
+        
+        # Extract first_name from full_name if missing
+        full_name = lead.get('full_name') or ''
+        first_name = lead.get('first_name')
+        if not first_name and full_name:
+            first_name = full_name.split()[0] if full_name.split() else 'there'
+        
+        # Get industry from raw_data if missing
+        industry = lead.get('industry')
+        if not industry and lead.get('raw_data'):
+            industry = lead['raw_data'].get('current_employer_industry')
+        
+        # Apply safe defaults for commonly-used fields
+        lead['first_name'] = first_name or 'there'
+        lead['full_name'] = full_name or lead.get('email', '').split('@')[0]
+        lead['industry'] = industry or ''
+        lead['title'] = lead.get('title') or ''
+        lead['company'] = lead.get('company') or ''
+        
+        return lead
 
 
 class Email:

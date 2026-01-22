@@ -172,12 +172,12 @@ class RocketReachClient:
         skipped_existing = 0
         
         while len(leads) < max_leads:
-            # Search for people
+            # Search for people - map campaign criteria keys to RocketReach API keys
             search_results = self.search_people(
-                current_title=criteria.get("current_title"),
+                current_title=criteria.get("current_title") or criteria.get("titles"),  # Support both keys
                 current_employer=criteria.get("current_employer"),
                 location=criteria.get("location"),
-                industry=criteria.get("industry"),
+                industry=criteria.get("industry") or criteria.get("industries"),  # Support both keys
                 keywords=criteria.get("keywords"),
                 page_size=page_size,
                 start=start

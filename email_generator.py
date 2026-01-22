@@ -40,10 +40,10 @@ class EmailGenerator:
         
         Returns specific insights we can reference in the email.
         """
-        company = lead.get('company', '')
-        title = lead.get('title', '')
-        industry = lead.get('industry', '')
-        first_name = lead.get('first_name', '')
+        company = lead.get('company') or ''
+        title = lead.get('title') or ''
+        industry = lead.get('industry') or ''
+        first_name = lead.get('first_name') or ''
         
         system_prompt = """You are researching a company to write a personalized cold email.
 Your job is to find ONE specific, interesting thing about this company that we can reference.
@@ -104,17 +104,17 @@ Find something SPECIFIC we can reference. Don't make things up."""
         Select the MOST RELEVANT case study for this specific lead.
         LeadGenJay: "If the prospect is nothing like your case study, it doesn't really help"
         """
-        industry = lead.get('industry', '').lower()
-        title = lead.get('title', '').lower()
-        pain_point = research.get('likely_pain_point', '').lower()
+        industry = (lead.get('industry') or '').lower()
+        title = (lead.get('title') or '').lower()
+        pain_point = (research.get('likely_pain_point') or '').lower()
         
         # Score each case study for relevance
         scores = {}
         
         for key, study in self.case_studies.items():
             score = 0
-            relevance_tags = [r.lower() for r in study.get('relevance', [])]
-            study_industry = study.get('industry', '').lower()
+            relevance_tags = [r.lower() for r in (study.get('relevance') or [])]
+            study_industry = (study.get('industry') or '').lower()
             
             # STRONG industry match (most important per LeadGenJay)
             if study_industry and study_industry in industry:
@@ -241,10 +241,10 @@ Create hyper-targeted campaign. Remember: ONE pain point, specific case study, u
         # Step 2: Select the most relevant case study
         case_study = self.select_case_study(lead, research)
         
-        first_name = lead.get('first_name', 'there')
-        company = lead.get('company', 'your company')
-        title = lead.get('title', '')
-        industry = lead.get('industry', '')
+        first_name = lead.get('first_name') or 'there'
+        company = lead.get('company') or 'your company'
+        title = lead.get('title') or ''
+        industry = lead.get('industry') or ''
         
         # Determine opening strategy based on research confidence
         if research.get('confidence') == 'high':
@@ -371,9 +371,14 @@ Remember:
             
             result = json.loads(response.choices[0].message.content)
             
-            # Validate and clean
-            subject = result.get("subject", f"{first_name}?")
-            body = result.get("body", "")
+            # Validate and clean - handle None values explicitly
+            subject = result.get("subject") or f"{first_name}?"
+            body = result.get("body") or ""
+            
+            # If body is empty or None, use fallback
+            if not body or not body.strip():
+                print(f"   GPT returned empty body, using fallback")
+                return self._fallback_email(lead, campaign_context, research, case_study)
             
             # Final validation
             body = self._validate_and_clean(body, lead, case_study)
@@ -390,6 +395,10 @@ Remember:
     
     def _validate_and_clean(self, body: str, lead: Dict, case_study: Dict) -> str:
         """Validate email doesn't contain banned patterns - STRICT per LeadGenJay"""
+        # Safety check for None
+        if body is None:
+            return ""
+        
         banned_phrases = [
             "i hope this finds you well",
             "i'm reaching out",
@@ -450,8 +459,8 @@ Remember:
     
     def _fallback_email(self, lead: Dict, context: Dict, research: Dict, case_study: Dict) -> Dict[str, str]:
         """Fallback email that sounds human, not templated"""
-        first_name = lead.get('first_name', 'there')
-        company = lead.get('company', 'your company')
+        first_name = lead.get('first_name') or 'there'
+        company = lead.get('company') or 'your company'
         
         # Different casual openers to avoid repetition
         openers = [
@@ -502,8 +511,8 @@ Worth a quick chat?"""
         
         LeadGenJay: "Don't say 'just following up'. Add something useful."
         """
-        first_name = lead.get('first_name', 'there')
-        company = lead.get('company', '')
+        first_name = lead.get('first_name') or 'there'
+        company = lead.get('company') or ''
         original_subject = previous[0]['subject'] if previous else "previous"
         
         system_prompt = """Write follow-up #2 for a cold email that got no reply.
@@ -541,9 +550,20 @@ Write a SHORT follow-up that adds value. Under 40 words."""
             )
             
             result = json.loads(response.choices[0].message.content)
+            body = result.get("body") or ""
+            if not body.strip():
+                # Use fallback if empty
+                return {
+                    "subject": f"Re: {original_subject}",
+                    "body": f"""one thing I forgot to mention - 
+
+we just wrote up how we cut deployment time by 3x for a company similar to {company}.
+
+might be relevant. happy to share if useful."""
+                }
             return {
                 "subject": f"Re: {original_subject}",
-                "body": result.get("body", "")
+                "body": body
             }
         except Exception as e:
             print(f"Error generating follow-up: {e}")
@@ -563,9 +583,9 @@ might be relevant. happy to share if useful."""
         
         LeadGenJay: "Email 3 should be a fresh start with different subject and angle"
         """
-        first_name = lead.get('first_name', 'there')
-        company = lead.get('company', '')
-        front_end_offer = context.get('front_end_offer', 'free architecture review')
+        first_name = lead.get('first_name') or 'there'
+        company = lead.get('company') or ''
+        front_end_offer = context.get('front_end_offer') or 'free architecture review'
         
         system_prompt = """Write follow-up #3 - a FRESH email with NEW thread.
 
@@ -601,9 +621,24 @@ Write a fresh email with different approach. Under 50 words."""
             )
             
             result = json.loads(response.choices[0].message.content)
+            subject = result.get("subject") or "different thought"
+            body = result.get("body") or ""
+            if not body.strip():
+                # Use fallback if empty
+                return {
+                    "subject": "different thought",
+                    "body": f"""{first_name} - 
+
+totally different idea. we're doing free {front_end_offer}s for companies in your space.
+
+30 mins, specific feedback, no pitch.
+
+interested?""",
+                    "new_thread": True
+                }
             return {
-                "subject": result.get("subject", "different thought"),
-                "body": result.get("body", ""),
+                "subject": subject,
+                "body": body,
                 "new_thread": True
             }
         except Exception as e:
@@ -621,8 +656,8 @@ interested?""",
     
     def _generate_breakup_email(self, lead: Dict, context: Dict, previous: List) -> Dict:
         """Final email - helpful redirect, not guilt trip"""
-        first_name = lead.get('first_name', 'there')
-        company = lead.get('company', '')
+        first_name = lead.get('first_name') or 'there'
+        company = lead.get('company') or ''
         
         # LeadGenJay tip: "Should I reach out to someone else?" works well
         body = f"""{first_name} -
