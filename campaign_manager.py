@@ -220,6 +220,14 @@ class CampaignManager:
                             emails_collection.delete_one({"_id": ObjectId(email_id)})
                             break  # Stop the campaign
                         
+                        elif skip_reason == "cooldown":
+                            # All accounts are in cooldown - wait and retry
+                            wait_seconds = result.get("wait_seconds", 60)
+                            print(f"   ⏳ All accounts in cooldown, waiting {wait_seconds // 60}m {wait_seconds % 60}s...")
+                            time.sleep(wait_seconds + 5)  # Add 5 seconds buffer
+                            # Don't increment failed - retry this lead
+                            continue
+                        
                         else:
                             # Actual send failure
                             Email.mark_failed(email_id, result.get("error", "Unknown error"))
@@ -239,12 +247,8 @@ class CampaignManager:
                             "subject": email_content["subject"],
                             "status": "sent"
                         })
-                    
-                    # Rate limiting - use config-based delay (20-35 min by default)
-                    if results["sent"] < len(leads):  # Don't delay after last email
-                        delay = get_random_delay()
-                        print(f"   ⏳ Waiting {delay // 60}m {delay % 60}s before next email...")
-                        time.sleep(delay)
+                        # No delay needed here - the per-account cooldown handles rate limiting
+                        # Next email will use a different account (rotation)
         
         finally:
             if not dry_run:
@@ -374,6 +378,7 @@ class CampaignManager:
                             "followup_number": followup_number,
                             "status": "sent"
                         })
+                        # No delay needed - per-account cooldown handles rate limiting
                     else:
                         # Check if we hit limits or time restrictions
                         skip_reason = result.get("skip_reason")
@@ -395,6 +400,13 @@ class CampaignManager:
                             emails_collection.delete_one({"_id": ObjectId(email_id)})
                             break
                         
+                        elif skip_reason == "cooldown":
+                            # All accounts in cooldown - wait and retry
+                            wait_seconds = result.get("wait_seconds", 60)
+                            print(f"   ⏳ All accounts in cooldown, waiting {wait_seconds // 60}m {wait_seconds % 60}s...")
+                            time.sleep(wait_seconds + 5)
+                            continue  # Retry this lead
+                        
                         else:
                             Email.mark_failed(email_id, result.get("error", "Unknown error"))
                             results["failed"] += 1
@@ -404,11 +416,6 @@ class CampaignManager:
                                 "status": "failed",
                                 "error": result.get("error")
                             })
-                    
-                    # Rate limiting - use config-based delay
-                    delay = get_random_delay()
-                    print(f"   ⏳ Waiting {delay // 60}m {delay % 60}s before next email...")
-                    time.sleep(delay)
         
         finally:
             if not dry_run:

@@ -446,6 +446,107 @@ class BlockedAccounts:
             print(f"   🔓 Unblocked {result.deleted_count} account(s) after cooldown expired")
 
 
+class AccountCooldown:
+    """Track per-account send cooldowns for rate limiting without blocking all accounts"""
+    
+    _collection = db["account_cooldowns"]
+    _collection.create_index("account_email", unique=True)
+    
+    @staticmethod
+    def record_send(account_email: str, cooldown_minutes: int):
+        """Record a send and set the cooldown for this account"""
+        available_at = datetime.utcnow() + timedelta(minutes=cooldown_minutes)
+        
+        AccountCooldown._collection.update_one(
+            {"account_email": account_email},
+            {
+                "$set": {
+                    "last_send_at": datetime.utcnow(),
+                    "available_at": available_at,
+                    "cooldown_minutes": cooldown_minutes
+                },
+                "$inc": {"total_sends": 1}
+            },
+            upsert=True
+        )
+    
+    @staticmethod
+    def is_available(account_email: str) -> bool:
+        """Check if an account is available (cooldown expired)"""
+        record = AccountCooldown._collection.find_one({"account_email": account_email})
+        if not record:
+            return True  # Never sent = available
+        
+        available_at = record.get("available_at")
+        if not available_at:
+            return True
+        
+        return datetime.utcnow() >= available_at
+    
+    @staticmethod
+    def get_available_at(account_email: str) -> Optional[datetime]:
+        """Get when the account will be available"""
+        record = AccountCooldown._collection.find_one({"account_email": account_email})
+        if record and record.get("available_at"):
+            return record["available_at"]
+        return None
+    
+    @staticmethod
+    def get_seconds_until_available(account_email: str) -> int:
+        """Get seconds until account is available (0 if available now)"""
+        available_at = AccountCooldown.get_available_at(account_email)
+        if not available_at:
+            return 0
+        
+        delta = (available_at - datetime.utcnow()).total_seconds()
+        return max(0, int(delta))
+    
+    @staticmethod
+    def get_next_available_account(account_emails: List[str]) -> Optional[str]:
+        """Get the first available account, or None if all on cooldown"""
+        for email in account_emails:
+            if AccountCooldown.is_available(email):
+                return email
+        return None
+    
+    @staticmethod
+    def get_soonest_available(account_emails: List[str]) -> tuple[Optional[str], int]:
+        """Get the account that will be available soonest and seconds until then"""
+        soonest_email = None
+        soonest_seconds = float('inf')
+        
+        for email in account_emails:
+            seconds = AccountCooldown.get_seconds_until_available(email)
+            if seconds == 0:
+                return email, 0  # Available now
+            if seconds < soonest_seconds:
+                soonest_seconds = seconds
+                soonest_email = email
+        
+        return soonest_email, int(soonest_seconds) if soonest_seconds != float('inf') else 0
+    
+    @staticmethod
+    def get_all_cooldown_status() -> Dict[str, Dict]:
+        """Get cooldown status for all accounts"""
+        records = AccountCooldown._collection.find()
+        now = datetime.utcnow()
+        
+        status = {}
+        for r in records:
+            email = r["account_email"]
+            available_at = r.get("available_at", now)
+            is_available = now >= available_at
+            
+            status[email] = {
+                "available": is_available,
+                "available_at": available_at,
+                "seconds_remaining": max(0, int((available_at - now).total_seconds())) if not is_available else 0,
+                "last_send_at": r.get("last_send_at"),
+                "total_sends": r.get("total_sends", 0)
+            }
+        return status
+
+
 class FailedEmails:
     """Track failed emails for retry logic"""
     

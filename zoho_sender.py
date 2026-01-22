@@ -107,18 +107,28 @@ class ZohoEmailSender:
         
         return True, f"Can send ({sends_today}/{daily_limit} used)", remaining
     
-    def _get_next_account(self) -> Optional[Dict[str, str]]:
-        """Get the next account to use based on rotation strategy and limits"""
-        from database import BlockedAccounts
+    def _get_next_account(self, respect_cooldown: bool = True) -> Optional[Dict[str, str]]:
+        """
+        Get the next account to use based on rotation strategy, limits, and cooldowns.
         
-        # Filter out blocked accounts AND accounts at daily limit
+        Args:
+            respect_cooldown: If True, skip accounts still in cooldown. If False, ignore cooldowns.
+        
+        Returns:
+            Account dict or None if no accounts available
+        """
+        from database import BlockedAccounts, AccountCooldown
+        
+        # Filter out blocked accounts, accounts at daily limit, and accounts in cooldown
         available_accounts = []
         blocked_count = 0
+        cooldown_count = 0
+        limit_count = 0
         
         for account in self.accounts:
             email = account["email"]
             
-            # Skip blocked accounts (persistent in database)
+            # Skip blocked accounts (554 errors - persistent in database)
             if BlockedAccounts.is_blocked(email):
                 blocked_until = BlockedAccounts.get_blocked_until(email)
                 if blocked_until:
@@ -128,17 +138,27 @@ class ZohoEmailSender:
             
             # Check daily limit
             can_send, reason, remaining = self._can_account_send(email)
-            if can_send:
-                available_accounts.append((account, remaining))
+            if not can_send:
+                limit_count += 1
+                continue
+            
+            # Check per-account cooldown (rate limiting between sends)
+            if respect_cooldown and not AccountCooldown.is_available(email):
+                cooldown_count += 1
+                continue
+            
+            available_accounts.append((account, remaining))
         
         if not available_accounts:
-            # Check if all accounts are blocked vs at limit
+            # Provide specific reason
             if blocked_count == len(self.accounts):
                 print("   ⚠️ All accounts are blocked by Zoho! Waiting for cooldown to expire...")
-                return None
-            else:
+            elif limit_count == len(self.accounts) - blocked_count:
                 print("   🛑 All accounts have reached their daily sending limit!")
-                return None
+            elif cooldown_count > 0:
+                # All remaining accounts are in cooldown - return info for caller to wait
+                pass  # Caller will handle this
+            return None
         
         if len(available_accounts) == 1:
             return available_accounts[0][0]
@@ -146,27 +166,46 @@ class ZohoEmailSender:
         if self.rotation_strategy == "random":
             return random.choice(available_accounts)[0]
         
-        # Round-robin with emails_per_account limit
-        if self._emails_sent_current_account >= self.emails_per_account:
-            self._current_account_index = (self._current_account_index + 1) % len(self.accounts)
-            self._emails_sent_current_account = 0
+        # Round-robin: find next available account
+        for account, remaining in available_accounts:
+            # Prefer accounts that haven't been used recently in round-robin
+            return account
         
-        # Find next available account in round-robin
-        attempts = 0
-        while attempts < len(self.accounts):
-            account = self.accounts[self._current_account_index]
-            email = account["email"]
-            
-            if not BlockedAccounts.is_blocked(email):
-                can_send, _, _ = self._can_account_send(email)
-                if can_send:
-                    return account
-            
-            self._current_account_index = (self._current_account_index + 1) % len(self.accounts)
-            self._emails_sent_current_account = 0
-            attempts += 1
+        return available_accounts[0][0] if available_accounts else None
+    
+    def get_wait_time_for_next_account(self) -> int:
+        """
+        Get seconds to wait until the next account is available.
+        Returns 0 if an account is available now.
+        """
+        from database import BlockedAccounts, AccountCooldown
         
-        return None
+        account_emails = [a["email"] for a in self.accounts]
+        
+        # Filter to accounts not blocked and not at daily limit
+        eligible_emails = []
+        for email in account_emails:
+            if BlockedAccounts.is_blocked(email):
+                continue
+            can_send, _, _ = self._can_account_send(email)
+            if can_send:
+                eligible_emails.append(email)
+        
+        if not eligible_emails:
+            return -1  # No accounts available at all today
+        
+        # Find soonest available among eligible accounts
+        soonest_email, seconds = AccountCooldown.get_soonest_available(eligible_emails)
+        return seconds
+    
+    def _record_send_cooldown(self, account_email: str):
+        """Record that an email was sent from this account, starting its cooldown"""
+        from database import AccountCooldown
+        import random
+        
+        # Random cooldown between MIN and MAX delay
+        cooldown_minutes = random.randint(config.MIN_DELAY_BETWEEN_EMAILS, config.MAX_DELAY_BETWEEN_EMAILS)
+        AccountCooldown.record_send(account_email, cooldown_minutes)
     
     def _mark_account_blocked(self, email: str, error_message: str = None):
         """Mark an account as blocked (554 error from Zoho) - persisted to database"""
@@ -243,7 +282,7 @@ class ZohoEmailSender:
         Returns:
             Dict with 'success', 'message'/'error', 'from_email', and optionally 'skip_reason'
         """
-        from database import SendingStats
+        from database import SendingStats, AccountCooldown
         
         # Check if within sending hours
         if not bypass_time_check:
@@ -251,11 +290,11 @@ class ZohoEmailSender:
             if not can_send_now:
                 return {"success": False, "error": time_reason, "from_email": None, "skip_reason": "time"}
         
-        # Get account to use (checks daily limits internally)
-        account = from_account or self._get_next_account()
+        # Get account to use (checks daily limits and cooldowns internally)
+        account = from_account or self._get_next_account(respect_cooldown=True)
         
         if account is None:
-            # Differentiate between "all blocked" vs "daily limit" for clearer ops/debugging
+            # Check why no account is available
             from database import BlockedAccounts
             blocked_count = sum(1 for a in self.accounts if BlockedAccounts.is_blocked(a["email"]))
 
@@ -267,22 +306,44 @@ class ZohoEmailSender:
                     "skip_reason": "blocked",
                 }
 
-            # If at least one account is unblocked, then it's most likely daily limits
-            any_unblocked_can_send = False
+            # Check if it's daily limits vs rate-limiting cooldowns
+            accounts_at_limit = 0
+            accounts_in_cooldown = 0
+            
             for a in self.accounts:
                 email = a["email"]
                 if BlockedAccounts.is_blocked(email):
                     continue
                 can_send, _, _ = self._can_account_send(email)
-                if can_send:
-                    any_unblocked_can_send = True
-                    break
+                if not can_send:
+                    accounts_at_limit += 1
+                elif not AccountCooldown.is_available(email):
+                    accounts_in_cooldown += 1
+
+            if accounts_at_limit == len(self.accounts) - blocked_count:
+                return {
+                    "success": False,
+                    "error": "All accounts have reached their daily sending limit",
+                    "from_email": None,
+                    "skip_reason": "limit",
+                }
+            
+            if accounts_in_cooldown > 0:
+                # All available accounts are in cooldown - return wait time
+                wait_seconds = self.get_wait_time_for_next_account()
+                return {
+                    "success": False,
+                    "error": f"All accounts in cooldown, wait {wait_seconds}s",
+                    "from_email": None,
+                    "skip_reason": "cooldown",
+                    "wait_seconds": wait_seconds,
+                }
 
             return {
                 "success": False,
-                "error": "All accounts have reached their daily sending limit" if not any_unblocked_can_send else "No available account",
+                "error": "No available account",
                 "from_email": None,
-                "skip_reason": "limit" if not any_unblocked_can_send else "unavailable",
+                "skip_reason": "unavailable",
             }
         
         from_email = account["email"]
@@ -331,6 +392,9 @@ class ZohoEmailSender:
             
             # Track the send for daily limits
             SendingStats.increment_send(from_email)
+            
+            # Record cooldown for this account (so we rotate to next account)
+            self._record_send_cooldown(from_email)
             
             # Get updated stats for display
             sends_today = SendingStats.get_sends_today(from_email)
