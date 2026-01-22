@@ -438,25 +438,9 @@ class CampaignManager:
         Returns:
             Combined results
         """
-        # Check if we can send before starting
+        # Always fetch leads if requested; only gate the actual sending by time/limits.
         status = self.email_sender.get_sending_status()
-        if not status["can_send_now"] and not dry_run:
-            print(f"⏸️ {status['time_reason']}")
-            return {
-                "campaign_id": campaign_id,
-                "skipped": True,
-                "reason": status["time_reason"]
-            }
-        
-        if status["total_remaining"] == 0 and not dry_run:
-            print("🛑 All accounts have reached their daily limits")
-            return {
-                "campaign_id": campaign_id,
-                "skipped": True,
-                "reason": "All accounts at daily limit"
-            }
-        
-        results = {
+        results: Dict[str, Any] = {
             "campaign_id": campaign_id,
             "leads_fetched": 0,
             "initial_emails": {},
@@ -468,20 +452,38 @@ class CampaignManager:
         if fetch_new_leads:
             leads = self.fetch_leads_for_campaign(campaign_id, max_leads)
             results["leads_fetched"] = len(leads)
+
+        # Decide whether sending is allowed right now
+        sending_allowed = True
+        skip_reason: Optional[str] = None
+        if not status["can_send_now"] and not dry_run:
+            sending_allowed = False
+            skip_reason = status["time_reason"]
+            print(f"⏸️ {skip_reason}")
+        elif status["total_remaining"] == 0 and not dry_run:
+            sending_allowed = False
+            skip_reason = "All accounts unavailable (blocked or at daily limit)"
+            print("🛑 All accounts unavailable (blocked or at daily limit)")
         
         # Send initial emails (delay is now handled internally using config)
         if send_initial:
-            results["initial_emails"] = self.send_initial_emails(
-                campaign_id,
-                dry_run=dry_run
-            )
+            if sending_allowed:
+                results["initial_emails"] = self.send_initial_emails(
+                    campaign_id,
+                    dry_run=dry_run
+                )
+            else:
+                results["initial_emails"] = {"skipped": True, "reason": skip_reason}
         
         # Send follow-ups (delay is now handled internally using config)
         if send_followups:
-            results["followup_emails"] = self.send_followup_emails(
-                campaign_id,
-                dry_run=dry_run
-            )
+            if sending_allowed:
+                results["followup_emails"] = self.send_followup_emails(
+                    campaign_id,
+                    dry_run=dry_run
+                )
+            else:
+                results["followup_emails"] = {"skipped": True, "reason": skip_reason}
         
         return results
     

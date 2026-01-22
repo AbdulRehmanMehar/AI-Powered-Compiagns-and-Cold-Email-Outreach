@@ -255,7 +255,35 @@ class ZohoEmailSender:
         account = from_account or self._get_next_account()
         
         if account is None:
-            return {"success": False, "error": "All accounts at daily limit", "from_email": None, "skip_reason": "limit"}
+            # Differentiate between "all blocked" vs "daily limit" for clearer ops/debugging
+            from database import BlockedAccounts
+            blocked_count = sum(1 for a in self.accounts if BlockedAccounts.is_blocked(a["email"]))
+
+            if blocked_count == len(self.accounts):
+                return {
+                    "success": False,
+                    "error": "All accounts are blocked by Zoho (cooldown active)",
+                    "from_email": None,
+                    "skip_reason": "blocked",
+                }
+
+            # If at least one account is unblocked, then it's most likely daily limits
+            any_unblocked_can_send = False
+            for a in self.accounts:
+                email = a["email"]
+                if BlockedAccounts.is_blocked(email):
+                    continue
+                can_send, _, _ = self._can_account_send(email)
+                if can_send:
+                    any_unblocked_can_send = True
+                    break
+
+            return {
+                "success": False,
+                "error": "All accounts have reached their daily sending limit" if not any_unblocked_can_send else "No available account",
+                "from_email": None,
+                "skip_reason": "limit" if not any_unblocked_can_send else "unavailable",
+            }
         
         from_email = account["email"]
         from_name = account["sender_name"]
@@ -468,10 +496,15 @@ Your Automation System"""
             sends_today = SendingStats.get_sends_today(email)
             daily_limit = self._get_daily_limit_for_account(email)
             remaining = max(0, daily_limit - sends_today)
-            total_remaining += remaining
             age_days = SendingStats.get_account_age_days(email)
             
             from database import BlockedAccounts
+            blocked = BlockedAccounts.is_blocked(email)
+
+            # Only count capacity from accounts we can actually use right now
+            if not blocked:
+                total_remaining += remaining
+
             accounts_status.append({
                 "email": email,
                 "sends_today": sends_today,
@@ -479,7 +512,7 @@ Your Automation System"""
                 "remaining": remaining,
                 "age_days": age_days,
                 "week": (age_days // 7) + 1,
-                "blocked": BlockedAccounts.is_blocked(email)
+                "blocked": blocked
             })
         
         return {
