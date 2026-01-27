@@ -18,6 +18,11 @@ services:
       - ZOHO_SENDER_NAMES=${ZOHO_SENDER_NAMES}
       - EMAIL_ROTATION_STRATEGY=${EMAIL_ROTATION_STRATEGY}
       - EMAILS_PER_ACCOUNT=${EMAILS_PER_ACCOUNT}
+      - VERIFY_EMAILS=${VERIFY_EMAILS}
+      - VERIFY_SMTP=${VERIFY_SMTP}
+      - LLM_PROVIDER=${LLM_PROVIDER}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL}
     healthcheck:
       test: ["CMD", "python", "-c", "from database import campaigns_collection; print('healthy') if campaigns_collection.database.client.server_info() else exit(1)"]
       interval: 30s
