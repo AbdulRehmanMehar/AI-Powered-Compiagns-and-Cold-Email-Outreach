@@ -319,13 +319,15 @@ class CampaignManager:
                                 "error": result.get("error")
                             })
                     else:
-                        Email.mark_sent(email_id)
+                        # Store which account sent this email for follow-up threading
+                        Email.mark_sent(email_id, from_email=result.get("from_email"))
                         Campaign.increment_stat(campaign_id, "emails_sent")
                         results["sent"] += 1
                         results["details"].append({
                             "lead_email": lead["email"],
                             "subject": email_content["subject"],
-                            "status": "sent"
+                            "status": "sent",
+                            "from_email": result.get("from_email")
                         })
                         # No delay needed here - the per-account cooldown handles rate limiting
                         # Next email will use a different account (rotation)
@@ -440,23 +442,36 @@ class CampaignManager:
                     print(f"  Subject: {email_content['subject']}")
                     results["sent"] += 1
                 else:
-                    # Send the email
+                    # Get the original sender account for this lead (thread consistency)
+                    original_sender = Email.get_sender_for_lead(lead_id, campaign_id)
+                    from_account = None
+                    if original_sender:
+                        # Find the account dict for this email
+                        for acc in self.email_sender.accounts:
+                            if acc["email"] == original_sender:
+                                from_account = acc
+                                print(f"  → Using original sender: {original_sender}")
+                                break
+                    
+                    # Send the email (uses original sender if found, otherwise rotates)
                     result = self.email_sender.send_email(
                         to_email=lead["email"],
                         subject=email_content["subject"],
                         body=email_content["body"],
                         to_name=lead.get("full_name"),
-                        html_body=text_to_html(email_content["body"])
+                        html_body=text_to_html(email_content["body"]),
+                        from_account=from_account
                     )
                     
                     if result["success"]:
-                        Email.mark_sent(email_id)
+                        Email.mark_sent(email_id, from_email=result.get("from_email"))
                         Campaign.increment_stat(campaign_id, "emails_sent")
                         results["sent"] += 1
                         results["details"].append({
                             "lead_email": lead["email"],
                             "followup_number": followup_number,
-                            "status": "sent"
+                            "status": "sent",
+                            "from_email": result.get("from_email")
                         })
                         # No delay needed - per-account cooldown handles rate limiting
                     else:

@@ -237,12 +237,31 @@ class Email:
         return str(result.inserted_id)
     
     @staticmethod
-    def mark_sent(email_id: str):
+    def mark_sent(email_id: str, from_email: str = None):
+        """Mark email as sent and store which account sent it"""
         from bson import ObjectId
+        update = {"status": Email.STATUS_SENT, "sent_at": datetime.utcnow()}
+        if from_email:
+            update["from_email"] = from_email
         emails_collection.update_one(
             {"_id": ObjectId(email_id)},
-            {"$set": {"status": Email.STATUS_SENT, "sent_at": datetime.utcnow()}}
+            {"$set": update}
         )
+    
+    @staticmethod
+    def get_sender_for_lead(lead_id: str, campaign_id: str) -> Optional[str]:
+        """Get the email account that originally emailed this lead in this campaign"""
+        from bson import ObjectId
+        email = emails_collection.find_one(
+            {
+                "lead_id": ObjectId(lead_id),
+                "campaign_id": ObjectId(campaign_id),
+                "status": Email.STATUS_SENT,
+                "from_email": {"$exists": True}
+            },
+            sort=[("sent_at", 1)]  # Get the first email sent
+        )
+        return email.get("from_email") if email else None
     
     @staticmethod
     def has_been_contacted(lead_id: str) -> bool:

@@ -290,6 +290,33 @@ class ZohoEmailSender:
             if not can_send_now:
                 return {"success": False, "error": time_reason, "from_email": None, "skip_reason": "time"}
         
+        # If a specific account is requested, check if it can send
+        if from_account:
+            from database import BlockedAccounts
+            account_email = from_account["email"]
+            
+            # Check if account is blocked
+            if BlockedAccounts.is_blocked(account_email):
+                # Fall back to rotation
+                print(f"  ⚠️  Original sender {account_email} is blocked, using rotation")
+                from_account = None
+            else:
+                # Check if account has capacity
+                can_send, reason, remaining = self._can_account_send(account_email)
+                if not can_send:
+                    # Fall back to rotation
+                    print(f"  ⚠️  Original sender {account_email} at limit ({reason}), using rotation")
+                    from_account = None
+                elif not AccountCooldown.is_available(account_email):
+                    # Account in cooldown - wait or use rotation
+                    wait_time = AccountCooldown.get_seconds_until_available(account_email)
+                    if wait_time <= 60:  # Wait if under 1 minute
+                        import time
+                        time.sleep(wait_time + 1)
+                    else:
+                        print(f"  ⚠️  Original sender {account_email} in cooldown, using rotation")
+                        from_account = None
+        
         # Get account to use (checks daily limits and cooldowns internally)
         account = from_account or self._get_next_account(respect_cooldown=True)
         
