@@ -440,8 +440,14 @@ class SendingStats:
     
     @staticmethod
     def get_account_age_days(account_email: str) -> int:
-        """Get how many days this account has been sending"""
-        # Find the earliest send date for this account
+        """Get how many days this account has been active (for warm-up)"""
+        # First check AccountMetadata for explicit added_date
+        added_date = AccountMetadata.get_added_date(account_email)
+        if added_date:
+            days = (datetime.utcnow() - added_date).days
+            return max(0, days)
+        
+        # Fallback: Find the earliest send date for this account
         oldest = SendingStats._collection.find_one(
             {"account_email": account_email},
             sort=[("date", 1)]
@@ -471,6 +477,50 @@ class SendingStats:
         ]
         result = list(SendingStats._collection.aggregate(pipeline))
         return result[0]["total"] if result else 0
+
+
+class AccountMetadata:
+    """Store email account metadata like added_date for warm-up tracking"""
+    
+    _collection = db["account_metadata"]
+    _collection.create_index("account_email", unique=True)
+    
+    @staticmethod
+    def set_added_date(account_email: str, added_date: datetime) -> None:
+        """Set the added_date for an account"""
+        AccountMetadata._collection.update_one(
+            {"account_email": account_email},
+            {
+                "$set": {
+                    "added_date": added_date,
+                    "updated_at": datetime.utcnow()
+                },
+                "$setOnInsert": {"created_at": datetime.utcnow()}
+            },
+            upsert=True
+        )
+    
+    @staticmethod
+    def get_added_date(account_email: str) -> Optional[datetime]:
+        """Get the added_date for an account"""
+        record = AccountMetadata._collection.find_one({"account_email": account_email})
+        return record.get("added_date") if record else None
+    
+    @staticmethod
+    def get_all() -> List[Dict[str, Any]]:
+        """Get all account metadata"""
+        return list(AccountMetadata._collection.find())
+    
+    @staticmethod
+    def initialize_accounts(account_emails: List[str], added_date: datetime) -> int:
+        """Initialize multiple accounts with the same added_date (if not already set)"""
+        count = 0
+        for email in account_emails:
+            existing = AccountMetadata._collection.find_one({"account_email": email})
+            if not existing:
+                AccountMetadata.set_added_date(email, added_date)
+                count += 1
+        return count
 
 
 class BlockedAccounts:
