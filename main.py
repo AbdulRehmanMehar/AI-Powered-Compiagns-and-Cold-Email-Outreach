@@ -19,6 +19,7 @@ Usage:
 import argparse
 import json
 import sys
+import logging
 from datetime import datetime
 
 from campaign_manager import CampaignManager
@@ -26,6 +27,14 @@ from rocketreach_client import RocketReachClient
 from zoho_sender import ZohoEmailSender
 from email_generator import EmailGenerator
 from database import Campaign, Lead, Email
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 
 def create_campaign_smart(description: str):

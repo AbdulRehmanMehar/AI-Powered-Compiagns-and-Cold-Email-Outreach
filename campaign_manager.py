@@ -2,12 +2,17 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import time
 import random
+import logging
 
 from database import Lead, Email, Campaign
 from rocketreach_client import RocketReachClient
 from email_generator import EmailGenerator
+from email_reviewer import EmailReviewer, ReviewStatus, format_review_report
 from zoho_sender import ZohoEmailSender, text_to_html
 import config
+
+# Module logger
+logger = logging.getLogger(__name__)
 
 
 def get_random_delay() -> int:
@@ -20,10 +25,13 @@ def get_random_delay() -> int:
 class CampaignManager:
     """Orchestrates the entire cold email campaign"""
     
-    def __init__(self):
+    def __init__(self, enable_review: bool = True, max_rewrites: int = 2):
         self.rocketreach = RocketReachClient()
         self.email_generator = EmailGenerator()
         self.email_sender = ZohoEmailSender()
+        self.email_reviewer = EmailReviewer() if enable_review else None
+        self.enable_review = enable_review
+        self.max_rewrites = max_rewrites
     
     def create_campaign(self,
                         name: str,
@@ -98,6 +106,59 @@ class CampaignManager:
         print(f"Fetched and saved {len(saved_leads)} leads")
         return saved_leads
     
+    def _review_and_rewrite_if_needed(self,
+                                       email_content: Dict[str, str],
+                                       lead: Dict[str, Any],
+                                       campaign_context: Dict[str, Any]) -> tuple:
+        """
+        Review email and rewrite if it fails quality checks.
+        
+        Returns:
+            (email_content, passed) - The final email and whether it passed review
+        """
+        if not self.email_reviewer:
+            return email_content, True
+        
+        attempt = 0
+        current_email = email_content
+        
+        while attempt <= self.max_rewrites:
+            attempt += 1
+            
+            # Review the email
+            review = self.email_reviewer.review_email(
+                email=current_email,
+                lead=lead,
+                save_review=True  # Store for learning
+            )
+            
+            if not review.rewrite_required:
+                if review.status == ReviewStatus.PASS:
+                    print(f"   ✅ Email passed review (score: {review.score})")
+                else:
+                    print(f"   ⚠️ Email passed with warnings (score: {review.score})")
+                return current_email, True
+            
+            # Failed - log issues
+            print(f"   ❌ Review failed (attempt {attempt}/{self.max_rewrites + 1}, score: {review.score})")
+            for violation in review.rule_violations[:2]:
+                print(f"      🚫 {violation}")
+            
+            if attempt > self.max_rewrites:
+                # Max rewrites exhausted
+                return current_email, False
+            
+            # Rewrite with feedback
+            print(f"   🔄 Rewriting email with feedback...")
+            current_email = self.email_reviewer._rewrite_email(
+                email=current_email,
+                lead=lead,
+                review=review,
+                campaign_context=campaign_context
+            )
+        
+        return current_email, False
+    
     def send_initial_emails(self,
                             campaign_id: str,
                             leads: List[Dict] = None,
@@ -167,6 +228,25 @@ class CampaignManager:
                     lead=lead,
                     campaign_context=campaign_context
                 )
+                
+                # QUALITY GATE: Review email before sending
+                if self.enable_review:
+                    email_content, review_passed = self._review_and_rewrite_if_needed(
+                        email_content=email_content,
+                        lead=lead,
+                        campaign_context=campaign_context
+                    )
+                    
+                    if not review_passed:
+                        print(f"   🚫 Email failed review after {self.max_rewrites} rewrites - marking for manual review")
+                        results["manual_review"] = results.get("manual_review", 0) + 1
+                        results["details"].append({
+                            "lead_email": lead["email"],
+                            "subject": email_content.get("subject", "N/A"),
+                            "status": "manual_review_required",
+                            "reason": "Failed quality review"
+                        })
+                        continue  # Skip to next lead
                 
                 # Create email record
                 email_id = Email.create(

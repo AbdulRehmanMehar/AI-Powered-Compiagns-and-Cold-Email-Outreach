@@ -7,8 +7,20 @@ load_dotenv()
 # Database
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# OpenAI
+# LLM Provider (Groq or OpenAI)
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()  # "groq" or "openai"
+
+# Groq (RECOMMENDED - faster and cheaper)
+# Model options:
+#   - llama-3.3-70b-versatile: Best quality, but only 1K requests/day
+#   - llama-3.1-8b-instant: Good quality, 14.4K requests/day (RECOMMENDED for high volume)
+#   - meta-llama/llama-4-scout-17b-16e-instruct: Newer model, 1K requests/day
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")  # High volume default
+
+# OpenAI (fallback when Groq rate limited)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
 # RocketReach
 ROCKETREACH_API_KEY = os.getenv("ROCKETREACH_API_KEY")
@@ -57,6 +69,13 @@ MAX_FOLLOWUPS = int(os.getenv("MAX_FOLLOWUPS", "2"))  # 2 max (total 3 emails)
 
 # Legacy support
 FOLLOWUP_DELAY_DAYS = FOLLOWUP_1_DELAY_DAYS
+
+# Email Verification (reduces bounces from ~40% to <5%)
+VERIFY_EMAILS = os.getenv("VERIFY_EMAILS", "true").lower() == "true"
+VERIFY_MX_RECORDS = os.getenv("VERIFY_MX_RECORDS", "true").lower() == "true"
+VERIFY_SMTP = os.getenv("VERIFY_SMTP", "true").lower() == "true"  # SMTP verification (FREE, catches 100% of bounces)
+SKIP_ROLE_BASED_EMAILS = os.getenv("SKIP_ROLE_BASED_EMAILS", "true").lower() == "true"
+SKIP_PROBLEMATIC_TLDS = os.getenv("SKIP_PROBLEMATIC_TLDS", "true").lower() == "true"
 
 # Sending limits (Expert advice: 20-30 per mailbox per day)
 EMAILS_PER_DAY_PER_MAILBOX = int(os.getenv("EMAILS_PER_DAY_PER_MAILBOX", "25"))

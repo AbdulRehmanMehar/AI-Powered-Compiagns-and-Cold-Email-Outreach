@@ -3,6 +3,9 @@ from typing import List, Dict, Any, Optional
 import config
 import time
 import re
+import socket
+import smtplib
+import random
 
 
 def is_valid_email(email: str) -> bool:
@@ -13,17 +16,282 @@ def is_valid_email(email: str) -> bool:
     return bool(re.match(pattern, email))
 
 
+def check_mx_records(domain: str, timeout: int = 5) -> bool:
+    """Check if domain has valid MX records"""
+    try:
+        import dns.resolver
+        resolver = dns.resolver.Resolver()
+        resolver.timeout = timeout
+        resolver.lifetime = timeout
+        records = resolver.resolve(domain, 'MX')
+        return len(list(records)) > 0
+    except ImportError:
+        # dnspython not installed, skip MX check
+        return True
+    except:
+        return False
+
+
+def get_bounced_domains() -> set:
+    """Get domains that have bounced from our database"""
+    try:
+        from database import db
+        bounced_emails = db.emails.distinct("recipient_email", {"status": "bounced"})
+        domains = {email.split('@')[1].lower() for email in bounced_emails if '@' in email}
+        return domains
+    except Exception:
+        return set()
+
+
+# Cache bounced domains (refreshed every time module loads)
+_BOUNCED_DOMAINS_CACHE = None
+
+
+def get_cached_bounced_domains() -> set:
+    """Get cached bounced domains (loads once per session)"""
+    global _BOUNCED_DOMAINS_CACHE
+    if _BOUNCED_DOMAINS_CACHE is None:
+        _BOUNCED_DOMAINS_CACHE = get_bounced_domains()
+    return _BOUNCED_DOMAINS_CACHE
+
+
+def refresh_bounced_domains_cache():
+    """Refresh the bounced domains cache"""
+    global _BOUNCED_DOMAINS_CACHE
+    _BOUNCED_DOMAINS_CACHE = get_bounced_domains()
+
+
+def quick_email_check(email: str, check_mx: bool = True, check_bounced_domains: bool = True) -> tuple:
+    """
+    Quick email validation with comprehensive checks.
+    Returns (is_valid, reason)
+    
+    Checks performed:
+    1. Syntax validation
+    2. Disposable domain detection
+    3. Role-based email detection  
+    4. Problematic TLD detection
+    5. Known bounced domain detection
+    6. Large company domain detection (high bounce risk for cold outreach)
+    7. MX record verification
+    """
+    if not email:
+        return False, "Empty email"
+    
+    email = email.lower().strip()
+    
+    # Basic syntax check
+    if not is_valid_email(email):
+        return False, "Invalid syntax"
+    
+    local_part, domain = email.rsplit('@', 1)
+    
+    # Check for disposable domains
+    disposable_domains = {
+        'tempmail.com', 'throwaway.email', 'guerrillamail.com', 'mailinator.com',
+        '10minutemail.com', 'temp-mail.org', 'fakeinbox.com', 'trashmail.com',
+        'yopmail.com', 'getnada.com', 'maildrop.cc', 'dispostable.com',
+        'sharklasers.com', 'getairmail.com', 'emailondeck.com', 'tempr.email'
+    }
+    if domain in disposable_domains:
+        return False, "Disposable domain"
+    
+    # Check for role-based emails (often bounce or go to team inboxes)
+    role_prefixes = {
+        'info', 'support', 'admin', 'contact', 'hello', 'sales', 'team', 
+        'office', 'hr', 'jobs', 'careers', 'marketing', 'press', 'media',
+        'help', 'service', 'billing', 'webmaster', 'postmaster', 'abuse',
+        'noreply', 'no-reply', 'donotreply', 'newsletter', 'enquiries',
+        'inquiries', 'orders', 'feedback', 'privacy', 'legal'
+    }
+    if any(local_part == prefix or local_part.startswith(f"{prefix}.") for prefix in role_prefixes):
+        return False, "Role-based email"
+    
+    # Check for suspicious patterns
+    # Too many numbers = likely auto-generated
+    digit_ratio = sum(c.isdigit() for c in local_part) / len(local_part) if local_part else 0
+    if digit_ratio > 0.6:
+        return False, "Too many digits (likely auto-generated)"
+    
+    # Very short local parts are risky (high bounce rate from our data)
+    if len(local_part) < 4:
+        return False, f"Local part too short ({len(local_part)} chars)"
+    
+    # Check for known problematic TLDs (expanded list based on bounce data)
+    problematic_tlds = {'.ir', '.ru', '.cn', '.in', '.br', '.bt', '.pk', '.bd', '.ng'}
+    if any(domain.endswith(tld) for tld in problematic_tlds):
+        return False, f"Problematic TLD (high bounce rate)"
+    
+    # Check against domains that have bounced before in our system
+    if check_bounced_domains:
+        bounced_domains = get_cached_bounced_domains()
+        if domain in bounced_domains:
+            return False, f"Domain has bounced before ({domain})"
+    
+    # Check for large company domains (high bounce rate for cold outreach - employees change frequently)
+    # These domains often accept email (catch-all) but then bounce later
+    large_company_domains = {
+        'google.com', 'microsoft.com', 'apple.com', 'amazon.com', 'meta.com',
+        'facebook.com', 'netflix.com', 'uber.com', 'airbnb.com', 'twitter.com',
+        'salesforce.com', 'oracle.com', 'ibm.com', 'intel.com', 'adobe.com',
+        'vmware.com', 'cisco.com', 'dell.com', 'hp.com', 'sap.com',
+        'linkedin.com', 'coinbase.com', 'stripe.com', 'square.com', 'paypal.com',
+        'upwork.com', 'fiverr.com'
+    }
+    if domain in large_company_domains:
+        return False, f"Large company domain (high bounce risk): {domain}"
+    
+    # Check MX records (most important check!)
+    if check_mx:
+        if not check_mx_records(domain):
+            return False, "No MX records (domain cannot receive email)"
+    
+    return True, "OK"
+
+
+def get_mx_host(domain: str, timeout: int = 5) -> Optional[str]:
+    """Get the primary MX host for a domain"""
+    try:
+        import dns.resolver
+        resolver = dns.resolver.Resolver()
+        resolver.timeout = timeout
+        resolver.lifetime = timeout
+        records = resolver.resolve(domain, 'MX')
+        # Return highest priority (lowest preference number) MX host
+        mx_host = str(sorted(records, key=lambda x: x.preference)[0].exchange).rstrip('.')
+        return mx_host
+    except:
+        return None
+
+
+def verify_email_smtp(email: str, timeout: int = 10) -> tuple:
+    """
+    Verify email via SMTP - checks if the mailbox actually exists.
+    This is FREE but slower (~1-5 seconds per email).
+    
+    Returns (is_valid, reason)
+    
+    Possible outcomes:
+    - (True, "OK") - Mailbox exists
+    - (True, "Catch-all domain") - Domain accepts all emails (risky but valid)
+    - (False, "Mailbox does not exist") - SMTP rejected the address
+    - (None, "Could not verify") - Server blocked verification
+    """
+    email = email.lower().strip()
+    
+    try:
+        domain = email.split('@')[1]
+    except:
+        return False, "Invalid email format"
+    
+    # Get MX host
+    mx_host = get_mx_host(domain, timeout=5)
+    if not mx_host:
+        return False, "No MX records"
+    
+    try:
+        # Connect to SMTP server
+        smtp = smtplib.SMTP(timeout=timeout)
+        smtp.connect(mx_host, 25)
+        smtp.helo('verify.primestrides.com')
+        
+        # Set sender
+        smtp.mail('verify@primestrides.com')
+        
+        # Check if recipient mailbox exists
+        code, message = smtp.rcpt(email)
+        
+        if code == 250:
+            # Accepted! But check if it's a catch-all domain
+            # by testing a random invalid email
+            random_email = f"definitely_invalid_{random.randint(100000, 999999)}@{domain}"
+            catch_code, _ = smtp.rcpt(random_email)
+            
+            smtp.quit()
+            
+            if catch_code == 250:
+                return True, "Catch-all domain (accepts all emails)"
+            return True, "OK"
+        
+        elif code in [550, 551, 552, 553, 554]:
+            # Mailbox doesn't exist
+            smtp.quit()
+            return False, f"Mailbox does not exist (SMTP {code})"
+        
+        else:
+            # Uncertain response
+            smtp.quit()
+            return None, f"Uncertain SMTP response: {code}"
+            
+    except smtplib.SMTPServerDisconnected:
+        return None, "Server disconnected"
+    except smtplib.SMTPConnectError:
+        return None, "Could not connect to mail server"
+    except socket.timeout:
+        return None, "Connection timeout"
+    except Exception as e:
+        return None, f"SMTP error: {str(e)[:50]}"
+
+
+def full_email_verification(email: str, use_smtp: bool = True) -> tuple:
+    """
+    Complete email verification with all checks including SMTP.
+    
+    Returns (is_valid, reason, details)
+    - is_valid: True/False/None (None = couldn't verify)
+    - reason: Human-readable explanation
+    - details: Dict with check results
+    """
+    details = {
+        'email': email,
+        'checks_passed': [],
+        'checks_failed': [],
+    }
+    
+    # First do quick checks (fast)
+    is_valid, reason = quick_email_check(email, check_mx=True)
+    
+    if not is_valid:
+        details['checks_failed'].append(('quick_check', reason))
+        return False, reason, details
+    
+    details['checks_passed'].append('quick_check')
+    
+    # Then do SMTP verification (slow but most accurate)
+    if use_smtp:
+        smtp_valid, smtp_reason = verify_email_smtp(email)
+        
+        if smtp_valid is False:
+            details['checks_failed'].append(('smtp', smtp_reason))
+            return False, smtp_reason, details
+        elif smtp_valid is True:
+            details['checks_passed'].append('smtp')
+            if "Catch-all" in smtp_reason:
+                details['warning'] = smtp_reason
+        else:
+            # Couldn't verify via SMTP - still allow but flag it
+            details['warning'] = f"SMTP verification inconclusive: {smtp_reason}"
+    
+    return True, "Email verified", details
+
+
 class RocketReachClient:
     """Client for RocketReach API to fetch leads"""
     
     BASE_URL = "https://api.rocketreach.co/v2/api"
     
-    def __init__(self):
+    def __init__(self, verify_emails: bool = None):
+        """
+        Args:
+            verify_emails: If True, verify emails before accepting (reduces bounces)
+                          If None, uses config.VERIFY_EMAILS
+        """
         self.api_key = config.ROCKETREACH_API_KEY
         self.headers = {
             "Api-Key": self.api_key,
             "Content-Type": "application/json"
         }
+        self.verify_emails = verify_emails if verify_emails is not None else getattr(config, 'VERIFY_EMAILS', True)
     
     def search_people(self, 
                       query: str = None,
@@ -151,25 +419,34 @@ class RocketReachClient:
                     max_leads: int = 50,
                     exclude_emails: set = None) -> List[Dict[str, Any]]:
         """
-        Fetch leads based on criteria and get their emails
+        Fetch leads based on criteria and get their emails.
+        
+        Uses SearchOffsetTracker to remember where we left off, so we don't
+        keep getting the same people every search.
         
         Args:
             criteria: Search criteria dict with keys like:
                 - current_title: List of job titles
                 - current_employer: List of companies
                 - location: List of locations
-                - industry: List of industries
+                - keywords: List of keywords (used instead of industry for broader results)
             max_leads: Maximum number of leads to fetch
             exclude_emails: Set of email addresses to skip (already contacted)
         
         Returns:
             List of leads with email addresses
         """
+        from database import SearchOffsetTracker
+        
         leads = []
-        start = 1
         page_size = min(25, max_leads)
         exclude_emails = {e.lower() for e in (exclude_emails or set())}
         skipped_existing = 0
+        
+        # Get the starting offset from tracker (continues from where we left off)
+        start = SearchOffsetTracker.get_next_offset(criteria)
+        initial_start = start
+        print(f"   📍 Starting RocketReach search from offset {start}")
         
         while len(leads) < max_leads:
             # Search for people - map campaign criteria keys to RocketReach API keys
@@ -177,16 +454,21 @@ class RocketReachClient:
                 current_title=criteria.get("current_title") or criteria.get("titles"),  # Support both keys
                 current_employer=criteria.get("current_employer"),
                 location=criteria.get("location"),
-                industry=criteria.get("industry") or criteria.get("industries"),  # Support both keys
+                industry=criteria.get("industry") or criteria.get("industries"),  # Support both keys (but prefer keywords)
                 keywords=criteria.get("keywords"),
                 page_size=page_size,
                 start=start
             )
             
             profiles = search_results.get("profiles", [])
+            pagination = search_results.get("pagination", {})
+            total_available = pagination.get("total", 0)
             
             if not profiles:
+                print(f"   ⚠️  No more profiles found at offset {start}")
                 break
+            
+            print(f"   🔍 Searching offset {start}-{start+len(profiles)} (total available: {total_available})")
             
             # Get detailed info for each profile
             for profile in profiles:
@@ -218,6 +500,23 @@ class RocketReachClient:
                             skipped_existing += 1
                             continue
                         
+                        # VERIFY EMAIL before accepting (reduces bounces)
+                        if self.verify_emails:
+                            # Quick checks first (instant)
+                            is_valid, reason = quick_email_check(email)
+                            if not is_valid:
+                                print(f"   ⚠️ Skipping {email} - {reason}")
+                                continue
+                            
+                            # SMTP verification (slower but catches remaining bounces)
+                            if getattr(config, 'VERIFY_SMTP', True):
+                                smtp_valid, smtp_reason = verify_email_smtp(email, timeout=10)
+                                if smtp_valid is False:
+                                    print(f"   ⚠️ Skipping {email} - SMTP: {smtp_reason}")
+                                    continue
+                                elif smtp_valid is True and "Catch-all" in smtp_reason:
+                                    print(f"   ⚡ Warning: {email} - {smtp_reason}")
+                        
                         if is_valid_email(email):
                             profile["email"] = email
                             profile.update(detailed)
@@ -234,10 +533,19 @@ class RocketReachClient:
             start += page_size
             
             # Check if we've exhausted results
-            pagination = search_results.get("pagination", {})
-            total = pagination.get("total", 0)
-            if start > total:
+            if start > total_available:
+                print(f"   📊 Reached end of results (total: {total_available})")
+                # Reset to beginning for next time (circular search)
+                SearchOffsetTracker.update_offset(criteria, 1, total_available)
                 break
+        
+        # Save where we left off for next search
+        if start != initial_start:
+            SearchOffsetTracker.update_offset(criteria, start, total_available if 'total_available' in dir() else None)
+            print(f"   💾 Saved search offset: {start} for next time")
+        
+        if skipped_existing > 0:
+            print(f"   ⏭️  Skipped {skipped_existing} already-contacted leads during search")
         
         return leads
     

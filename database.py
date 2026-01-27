@@ -2,6 +2,8 @@ from pymongo import MongoClient
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 import config
+import json
+import re
 
 client = MongoClient(config.DATABASE_URL)
 db = client.get_database()
@@ -10,11 +12,101 @@ db = client.get_database()
 leads_collection = db["leads"]
 emails_collection = db["emails"]
 campaigns_collection = db["campaigns"]
+email_reviews_collection = db["email_reviews"]
 
 # Create indexes
 leads_collection.create_index("email", unique=True)
 emails_collection.create_index([("lead_id", 1), ("campaign_id", 1)])
 emails_collection.create_index("status")
+email_reviews_collection.create_index([("created_at", -1)])
+email_reviews_collection.create_index([("passed", 1)])
+email_reviews_collection.create_index([("email_id", 1)])
+
+
+def is_valid_first_name(name: str) -> bool:
+    """
+    Check if a string is a valid first name for use in cold emails.
+    
+    Rejects:
+    - Single letters or very short strings
+    - Company names (multiple words, Inc, Ltd, etc.)
+    - Names with numbers or special characters
+    - Common non-name patterns
+    """
+    if not name or not isinstance(name, str):
+        return False
+    
+    name = name.strip()
+    
+    # Too short (single letter or 2 chars)
+    if len(name) < 3:
+        return False
+    
+    # Too long for a first name (likely company name)
+    if len(name) > 20:
+        return False
+    
+    # Contains numbers
+    if any(c.isdigit() for c in name):
+        return False
+    
+    # Contains special characters (except hyphen for names like Jean-Pierre)
+    if re.search(r'[^\w\s\-\']', name):
+        return False
+    
+    # Multiple words (likely company name) - first names are usually one word
+    if len(name.split()) > 1:
+        return False
+    
+    # Company name indicators
+    company_indicators = ['inc', 'ltd', 'llc', 'corp', 'company', 'co', 'group', 'technologies', 
+                          'services', 'solutions', 'consulting', 'capital', 'ventures', 'labs',
+                          'studio', 'agency', 'media', 'digital', 'global', 'international']
+    if name.lower() in company_indicators:
+        return False
+    
+    # Names that look like company names (end with common company suffixes)
+    if name.lower().endswith(('tech', 'soft', 'ware', 'corp', 'labs', 'hub', 'io')):
+        return False
+    
+    # Common invalid patterns (from actual bad data)
+    invalid_names = {'in', 'ysis', 'api', 'ceo', 'cto', 'vp', 'the', 'mr', 'ms', 'mrs', 'dr',
+                     'n/a', 'na', 'none', 'null', 'test', 'admin', 'info', 'hello', 'support',
+                     'sales', 'contact', 'team', 'general', 'office', 'main', 'primary',
+                     'fazmercado', 'bitpin', 'coinbase', 'workflow'}  # Known bad patterns from data
+    if name.lower() in invalid_names:
+        return False
+    
+    # Must start with a letter
+    if not name[0].isalpha():
+        return False
+    
+    return True
+
+
+def clean_first_name(full_name: str, email: str = None) -> str:
+    """
+    Extract and validate a first name from full name or email.
+    Returns 'there' if no valid name found.
+    """
+    # Try extracting from full name
+    if full_name:
+        parts = full_name.strip().split()
+        if parts:
+            candidate = parts[0]
+            if is_valid_first_name(candidate):
+                return candidate.capitalize()
+    
+    # Try extracting from email (before @ and before any dots/numbers)
+    if email and '@' in email:
+        local_part = email.split('@')[0]
+        # Remove numbers and get first part before dots/underscores
+        name_part = re.split(r'[._\d]', local_part)[0]
+        if is_valid_first_name(name_part):
+            return name_part.capitalize()
+    
+    # Fallback
+    return 'there'
 
 
 class Lead:
@@ -23,16 +115,19 @@ class Lead:
     @staticmethod
     def create(data: Dict[str, Any]) -> str:
         """Create or update a lead"""
-        # Extract first_name - try from data, or parse from full name
-        first_name = data.get("first_name")
+        # Extract and validate first_name
         full_name = data.get("name") or data.get("full_name") or ""
+        email = data.get("email") or ""
         
-        # If first_name is None/empty but we have full_name, extract it
-        if not first_name and full_name:
-            first_name = full_name.split()[0] if full_name.split() else None
+        # Use the new validation function
+        first_name = clean_first_name(full_name, email)
+        
+        # If data has explicit first_name, validate it
+        if data.get("first_name") and is_valid_first_name(data.get("first_name")):
+            first_name = data.get("first_name").capitalize()
         
         lead = {
-            "email": data.get("email"),
+            "email": email,
             "first_name": first_name,
             "last_name": data.get("last_name"),
             "full_name": full_name or f"{data.get('first_name') or ''} {data.get('last_name') or ''}".strip(),
@@ -82,11 +177,14 @@ class Lead:
         if not lead:
             return lead
         
-        # Extract first_name from full_name if missing
+        # Use validation function to get clean first name
         full_name = lead.get('full_name') or ''
+        email = lead.get('email') or ''
         first_name = lead.get('first_name')
-        if not first_name and full_name:
-            first_name = full_name.split()[0] if full_name.split() else 'there'
+        
+        # Validate existing first_name or extract from full_name/email
+        if not first_name or not is_valid_first_name(first_name):
+            first_name = clean_first_name(full_name, email)
         
         # Get industry from raw_data if missing
         industry = lead.get('industry')
@@ -94,7 +192,7 @@ class Lead:
             industry = lead['raw_data'].get('current_employer_industry')
         
         # Apply safe defaults for commonly-used fields
-        lead['first_name'] = first_name or 'there'
+        lead['first_name'] = first_name
         lead['full_name'] = full_name or lead.get('email', '').split('@')[0]
         lead['industry'] = industry or ''
         lead['title'] = lead.get('title') or ''
@@ -640,3 +738,68 @@ class FailedEmails:
         if result:
             return result[0]
         return {"total_failed": 0, "with_retries": 0, "max_retries_reached": 0}
+
+
+class SearchOffsetTracker:
+    """
+    Track search pagination offsets to avoid re-searching the same people.
+    
+    Problem: RocketReach always returns results starting from position 1.
+    If we search for "Founders in US" multiple times, we get the SAME people.
+    
+    Solution: Track the last offset we searched to, and start from there next time.
+    """
+    
+    _collection = db["search_offsets"]
+    _collection.create_index("search_hash", unique=True)
+    
+    @staticmethod
+    def _hash_criteria(criteria: Dict) -> str:
+        """Create a unique hash for search criteria"""
+        import hashlib
+        # Sort keys for consistent hashing
+        criteria_str = json.dumps(criteria, sort_keys=True)
+        return hashlib.md5(criteria_str.encode()).hexdigest()
+    
+    @staticmethod
+    def get_next_offset(criteria: Dict) -> int:
+        """Get the starting offset for this search criteria"""
+        search_hash = SearchOffsetTracker._hash_criteria(criteria)
+        record = SearchOffsetTracker._collection.find_one({"search_hash": search_hash})
+        
+        if record:
+            return record.get("next_offset", 1)
+        return 1
+    
+    @staticmethod
+    def update_offset(criteria: Dict, new_offset: int, total_available: int = None):
+        """Update the offset after a search"""
+        search_hash = SearchOffsetTracker._hash_criteria(criteria)
+        
+        update_data = {
+            "search_hash": search_hash,
+            "criteria_summary": str(criteria)[:200],  # For debugging
+            "next_offset": new_offset,
+            "updated_at": datetime.utcnow()
+        }
+        
+        if total_available:
+            update_data["total_available"] = total_available
+        
+        SearchOffsetTracker._collection.update_one(
+            {"search_hash": search_hash},
+            {"$set": update_data, "$setOnInsert": {"created_at": datetime.utcnow()}},
+            upsert=True
+        )
+    
+    @staticmethod
+    def reset_offset(criteria: Dict):
+        """Reset offset for a search (start from beginning)"""
+        search_hash = SearchOffsetTracker._hash_criteria(criteria)
+        SearchOffsetTracker._collection.delete_one({"search_hash": search_hash})
+    
+    @staticmethod
+    def get_all_offsets() -> List[Dict]:
+        """Get all tracked offsets for debugging"""
+        return list(SearchOffsetTracker._collection.find({}, {"_id": 0}))
+
