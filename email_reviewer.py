@@ -446,25 +446,36 @@ class EmailReviewer:
                 
                 response = self.client.chat.completions.create(**kwargs)
                 
+                # Check for empty response
+                content = response.choices[0].message.content
+                if not content or content.strip() == '':
+                    print(f"   ⚠️ {available_model} returned empty response, trying next model...")
+                    continue
+                
+                # Validate JSON if json_mode was requested
+                if json_mode:
+                    try:
+                        json.loads(content)
+                    except json.JSONDecodeError as e:
+                        print(f"   ⚠️ {available_model} returned invalid JSON, trying next model...")
+                        continue
+                
                 # Record successful request with token usage
                 tokens_used = 2000  # Default estimate
                 if hasattr(response, 'usage') and response.usage:
                     tokens_used = getattr(response.usage, 'total_tokens', 2000)
                 self.rate_limiter.record_request(available_model, tokens_used)
                 
-                return response.choices[0].message.content
+                return content
                 
             except Exception as e:
                 error_str = str(e).lower()
                 last_error = e
                 
-                # If it's a rate limit error, mark this model as exhausted and try next
+                # If it's a rate limit error, mark this model as depleted and try next
                 if 'rate' in error_str and 'limit' in error_str:
-                    data = self.rate_limiter._get_cache(available_model)
-                    limits = GROQ_MODEL_LIMITS.get(available_model, {})
-                    data['tokens_used'] = limits.get('tokens_per_day', 100000)
-                    self.rate_limiter._save_to_db(available_model, data)
-                    print(f"   ⚠️ Reviewer: {available_model} hit rate limit, trying next model...")
+                    self.rate_limiter.mark_model_depleted(available_model, "429_rate_limit")
+                    print(f"   ⚠️ Reviewer: {available_model} hit rate limit, marked as depleted, trying next model...")
                     continue
                 else:
                     raise
@@ -509,6 +520,11 @@ class EmailReviewer:
         issues.extend(ai_result['issues'])
         suggestions.extend(ai_result['suggestions'])
         score -= ai_result['penalty']
+        
+        # CRITICAL: If AI review failed, treat it as a rule violation
+        # Emails should NOT pass without proper AI review
+        if ai_result.get('ai_review_failed', False):
+            rule_violations.append("AI review failed - email must be re-reviewed")
         
         # Clamp score
         score = max(0, min(100, score))
@@ -1085,11 +1101,18 @@ Pay special attention to whether this sounds human or AI-written."""
             
         except Exception as e:
             print(f"AI review failed: {e}")
+            # IMPORTANT: When AI review fails, flag it so review_email can fail the email
+            # Emails should NOT pass without proper AI review
             return {
-                "issues": [],
-                "suggestions": [],
+                "issues": [{
+                    "type": "ai_review_failed",
+                    "severity": "critical",  # Changed from warning to critical
+                    "message": f"AI review failed: {str(e)} - email needs manual review or retry"
+                }],
+                "suggestions": ["Retry email generation or manually review before sending"],
                 "feedback": f"AI review failed: {str(e)}",
-                "penalty": 0
+                "penalty": 15,
+                "ai_review_failed": True  # Flag to trigger rule violation
             }
     
     def review_and_rewrite_if_needed(self,

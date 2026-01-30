@@ -48,7 +48,8 @@ class ICPManager:
         """Lazy load Groq client."""
         if self._groq_client is None:
             import groq
-            self._groq_client = groq.Groq(api_key=self.groq_api_key)
+            # Disable SDK auto-retry - we handle retries ourselves with model rotation
+            self._groq_client = groq.Groq(api_key=self.groq_api_key, max_retries=0)
         return self._groq_client
     
     def _call_llm(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, json_mode: bool = True) -> str:
@@ -88,23 +89,26 @@ class ICPManager:
                 
                 response = self.groq_client.chat.completions.create(**kwargs)
                 
+                # Check for empty response
+                content = response.choices[0].message.content
+                if not content or content.strip() == '':
+                    logger.warning(f"ICPManager: {available_model} returned empty response, trying next...")
+                    continue
+                
                 tokens_used = 2000
                 if hasattr(response, 'usage') and response.usage:
                     tokens_used = getattr(response.usage, 'total_tokens', 2000)
                 self.rate_limiter.record_request(available_model, tokens_used)
                 
-                return response.choices[0].message.content
+                return content
                 
             except Exception as e:
                 error_str = str(e).lower()
                 last_error = e
                 
                 if 'rate' in error_str and 'limit' in error_str:
-                    data = self.rate_limiter._get_cache(available_model)
-                    limits = GROQ_MODEL_LIMITS.get(available_model, {})
-                    data['tokens_used'] = limits.get('tokens_per_day', 100000)
-                    self.rate_limiter._save_to_db(available_model, data)
-                    logger.warning(f"ICPManager: {available_model} hit rate limit, trying next...")
+                    self.rate_limiter.mark_model_depleted(available_model, "429_rate_limit")
+                    logger.warning(f"ICPManager: {available_model} hit rate limit, marked as depleted, trying next...")
                     continue
                 else:
                     raise

@@ -51,7 +51,8 @@ class LeadEnricher:
     """
     
     def __init__(self):
-        self.groq_client = Groq(api_key=GROQ_API_KEY)
+        # Disable SDK auto-retry - we handle retries ourselves with model rotation
+        self.groq_client = Groq(api_key=GROQ_API_KEY, max_retries=0)
         self.rate_limiter = get_rate_limiter()
         self.http_client = httpx.AsyncClient(
             timeout=REQUEST_TIMEOUT,
@@ -94,24 +95,27 @@ class LeadEnricher:
                     max_tokens=max_tokens
                 )
                 
+                # Check for empty response
+                content = response.choices[0].message.content
+                if not content or content.strip() == '':
+                    logger.warning(f"Enricher: {available_model} returned empty response, trying next...")
+                    continue
+                
                 # Record usage
                 tokens_used = 1000
                 if hasattr(response, 'usage') and response.usage:
                     tokens_used = getattr(response.usage, 'total_tokens', 1000)
                 self.rate_limiter.record_request(available_model, tokens_used)
                 
-                return response.choices[0].message.content
+                return content
                 
             except Exception as e:
                 error_str = str(e).lower()
                 last_error = e
                 
                 if 'rate' in error_str and 'limit' in error_str:
-                    data = self.rate_limiter._get_cache(available_model)
-                    limits = GROQ_MODEL_LIMITS.get(available_model, {})
-                    data['tokens_used'] = limits.get('tokens_per_day', 100000)
-                    self.rate_limiter._save_to_db(available_model, data)
-                    logger.warning(f"Enricher: {available_model} hit rate limit, trying next...")
+                    self.rate_limiter.mark_model_depleted(available_model, "429_rate_limit")
+                    logger.warning(f"Enricher: {available_model} hit rate limit, marked as depleted, trying next...")
                     continue
                 else:
                     raise

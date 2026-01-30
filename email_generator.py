@@ -395,6 +395,27 @@ class GroqRateLimiter:
         if usage['requests_today'] % 5 == 0:
             self._save_usage(model, usage)
     
+    def mark_model_depleted(self, model: str, reason: str = "rate_limit"):
+        """
+        Mark a model as depleted for today (hit rate limit from API).
+        This maxes out BOTH request and token counts so check_limit will reject it.
+        """
+        data = self._get_cached(model)
+        usage = data.get('usage', {})
+        
+        # Max out both limits to ensure model is skipped
+        usage['requests_today'] = data.get('requests_per_day', 1000)
+        usage['tokens_today'] = data.get('tokens_per_day', 100000)
+        usage['date'] = self._get_today()
+        usage['depleted_reason'] = reason
+        usage['depleted_at'] = time.time()
+        
+        data['usage'] = usage
+        self._cache[model] = data
+        self._save_usage(model, usage)
+        
+        logger.warning(f"Model {model} marked as depleted: {reason}")
+    
     def get_all_models(self) -> list:
         """Get all models with their limits and usage from DB"""
         try:
@@ -418,8 +439,13 @@ class GroqRateLimiter:
     
     def get_best_available_model(self, preferred_model: str = None) -> Optional[str]:
         """
-        Get the best available model from the fallback chain.
-        AGGRESSIVE: Distributes load across models to avoid hitting any single model's limit.
+        Get the best available model using smart load balancing.
+        
+        STRATEGY: Weighted Load Balancing with Quality Preference
+        - Distributes load proportionally based on remaining capacity
+        - Prefers higher-quality models when capacity is similar
+        - Automatically shifts load away from models approaching limits
+        
         Returns None if all models are rate limited.
         """
         # Get all enabled models sorted by priority
@@ -431,47 +457,90 @@ class GroqRateLimiter:
         
         # Build chain: use DB models if available, else fallback to hardcoded
         if enabled_models:
-            # Score by: remaining capacity, then priority
-            def score_model(m):
-                usage = m.get('usage', {})
-                tokens_used = usage.get('tokens_today', 0)
-                token_limit = m.get('tokens_per_day', 100000)
-                usage_pct = (tokens_used / token_limit * 100) if token_limit > 0 else 0
-                priority = m.get('priority', 99)
-                return (usage_pct > 80, priority, usage_pct)
-            
-            enabled_models.sort(key=score_model)
-            chain = [m['model'] for m in enabled_models]
+            chain_models = enabled_models
         else:
-            chain = GROQ_FALLBACK_CHAIN.copy()
+            chain_models = [
+                {'model': m, **DEFAULT_GROQ_LIMITS.get(m, {})} 
+                for m in GROQ_FALLBACK_CHAIN
+            ]
         
-        # Get usage stats for logging
-        model_stats = {}
-        for model in chain:
+        # Calculate availability score for each model
+        # Score = (remaining_capacity_pct * 100) - (priority * 5)
+        # Higher score = better choice
+        model_scores = []
+        
+        for m in chain_models:
+            model = m['model']
             data = self._get_cached(model)
-            usage = data.get('usage', {})
-            tokens_used = usage.get('tokens_today', 0)
-            token_limit = data.get('tokens_per_day', 100000)
-            model_stats[model] = (tokens_used / token_limit * 100) if token_limit > 0 else 0
-        
-        # If preferred model has < 80% usage, prioritize it
-        if preferred_model and model_stats.get(preferred_model, 100) < 80:
-            if preferred_model in chain:
-                chain.remove(preferred_model)
-            chain.insert(0, preferred_model)
-        
-        for model in chain:
+            
+            # Check basic availability
             can_proceed, wait_time, reason = self.check_limit(model)
-            if can_proceed:
-                if model != (preferred_model or chain[0]) and preferred_model:
-                    usage = model_stats.get(model, 0)
-                    print(f"   🔄 Using {model} ({usage:.0f}% capacity used)")
-                return model
-            elif reason == "minute_limit" and wait_time < 5:
-                time.sleep(wait_time + 0.5)
-                return model
+            if not can_proceed and reason != "minute_limit":
+                continue
+            if reason == "minute_limit" and wait_time > 5:
+                continue
+            
+            usage = data.get('usage', {})
+            
+            # Calculate remaining capacity as percentage
+            requests_today = usage.get('requests_today', 0)
+            requests_limit = data.get('requests_per_day', 1000)
+            tokens_today = usage.get('tokens_today', 0)
+            tokens_limit = data.get('tokens_per_day', 100000)
+            
+            # For "unlimited" token models (10M+), only consider request limits
+            if tokens_limit >= 10000000:
+                remaining_pct = max(0, (requests_limit - requests_today) / requests_limit * 100)
+            else:
+                # Use the more restrictive limit
+                request_remaining = max(0, (requests_limit - requests_today) / requests_limit * 100)
+                token_remaining = max(0, (tokens_limit - tokens_today) / tokens_limit * 100)
+                remaining_pct = min(request_remaining, token_remaining)
+            
+            # Priority bonus (lower priority number = better quality = higher bonus)
+            priority = data.get('priority', 99)
+            quality_bonus = max(0, 20 - priority * 2)  # Priority 1 = +18, Priority 10 = 0
+            
+            # Calculate final score
+            score = remaining_pct + quality_bonus
+            
+            # Penalty for models below 20% capacity (avoid exhausting completely)
+            if remaining_pct < 20:
+                score -= 30
+            
+            model_scores.append({
+                'model': model,
+                'score': score,
+                'remaining_pct': remaining_pct,
+                'priority': priority,
+                'wait_time': wait_time if reason == "minute_limit" else 0
+            })
         
-        return None
+        if not model_scores:
+            return None
+        
+        # Sort by score (highest first)
+        model_scores.sort(key=lambda x: (-x['score'], x['priority']))
+        
+        # Select best model
+        best = model_scores[0]
+        
+        # If needs a short wait, do it
+        if best['wait_time'] > 0:
+            time.sleep(best['wait_time'] + 0.5)
+        
+        # Log if switching from preferred model
+        if preferred_model and best['model'] != preferred_model:
+            pref_remaining = next(
+                (m['remaining_pct'] for m in model_scores if m['model'] == preferred_model), 
+                0
+            )
+            logger.info(
+                f"Load balance: {preferred_model} ({pref_remaining:.0f}% left) → "
+                f"{best['model']} ({best['remaining_pct']:.0f}% left, score: {best['score']:.0f})"
+            )
+        
+        return best['model']
     
     def get_usage_stats(self) -> dict:
         """Get current usage statistics for all models including token usage"""
@@ -514,6 +583,39 @@ class GroqRateLimiter:
         for model, data in self._cache.items():
             usage = data.get('usage', {})
             self._save_usage(model, usage)
+    
+    def show_load_distribution(self) -> str:
+        """
+        Show current load distribution across all models.
+        Useful for monitoring load balancing effectiveness.
+        """
+        stats = self.get_usage_stats()
+        lines = ["=== Model Load Distribution ==="]
+        
+        # Sort by percent used (descending)
+        sorted_models = sorted(
+            stats.items(), 
+            key=lambda x: (not x[1].get('enabled', True), -x[1].get('percent_used', 0))
+        )
+        
+        total_requests = sum(s['requests_today'] for s in stats.values())
+        total_tokens = sum(s['tokens_used'] for s in stats.values())
+        
+        for model, s in sorted_models:
+            if model not in GROQ_FALLBACK_CHAIN:
+                continue
+            enabled = "✅" if s.get('enabled', True) else "❌"
+            pct = s.get('percent_used', 0)
+            bar_len = int(pct / 5)  # 20 char bar max
+            bar = "█" * bar_len + "░" * (20 - bar_len)
+            
+            req_info = f"{s['requests_today']:,}/{s['requests_limit']:,} req"
+            tok_info = f"{s['tokens_used']:,}/{s['tokens_limit']:,} tok"
+            
+            lines.append(f"{enabled} {model[:35]:<35} [{bar}] {pct:5.1f}% | {req_info}")
+        
+        lines.append(f"\nTotal today: {total_requests:,} requests, {total_tokens:,} tokens")
+        return "\n".join(lines)
 
 
 # Global rate limiter instance
@@ -618,7 +720,8 @@ def get_llm_client(provider: str = None, model: str = None):
         from groq import Groq
         if model is None:
             model = getattr(config, 'GROQ_MODEL', 'llama-3.3-70b-versatile')
-        return Groq(api_key=config.GROQ_API_KEY), model, 'groq'
+        # Disable SDK auto-retry - we handle retries ourselves with model rotation
+        return Groq(api_key=config.GROQ_API_KEY, max_retries=0), model, 'groq'
     else:
         from openai import OpenAI
         if model is None:
@@ -714,14 +817,15 @@ class EmailGenerator:
                 error_str = str(e).lower()
                 last_error = e
                 
-                # If it's a rate limit error, mark this model as exhausted and try next
+                # If it's a rate limit error or empty/invalid response, try next model
                 if 'rate' in error_str and 'limit' in error_str:
-                    # Mark this model as at capacity for today
-                    data = self.rate_limiter._get_cache(available_model)
-                    limits = GROQ_MODEL_LIMITS.get(available_model, {})
-                    data['tokens_used'] = limits.get('tokens_per_day', 100000)  # Max out the token count
-                    self.rate_limiter._save_to_db(available_model, data)
-                    print(f"   ⚠️ {available_model} hit rate limit, trying next model...")
+                    # Mark this model as depleted for today (maxes out both requests AND tokens)
+                    self.rate_limiter.mark_model_depleted(available_model, "429_rate_limit")
+                    print(f"   ⚠️ {available_model} hit rate limit, marked as depleted, trying next model...")
+                    continue
+                elif 'empty response' in error_str or 'invalid json' in error_str:
+                    # Model returned empty or invalid content, try next
+                    print(f"   ⚠️ {available_model} returned bad response, trying next model...")
                     continue
                 else:
                     # Non-rate-limit error, raise it
@@ -746,6 +850,19 @@ class EmailGenerator:
         # Single attempt - let _call_llm handle fallback
         response = client.chat.completions.create(**kwargs)
         
+        # Check for empty response - some models return empty content
+        content = response.choices[0].message.content
+        if not content or content.strip() == '':
+            raise ValueError(f"Model {model} returned empty response")
+        
+        # If json_mode requested, validate it's actually valid JSON
+        # This catches cases where model returns garbage or partial response
+        if json_mode:
+            try:
+                json.loads(content)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Model {model} returned invalid JSON: {str(e)[:50]}")
+        
         # Record successful Groq request with actual token usage
         if record_usage and self.rate_limiter:
             # Extract actual token usage from response
@@ -754,7 +871,7 @@ class EmailGenerator:
                 tokens_used = getattr(response.usage, 'total_tokens', 2000)
             self.rate_limiter.record_request(model, tokens_used)
         
-        return response.choices[0].message.content
+        return content
     
     def research_company(self, lead: Dict[str, Any]) -> Dict[str, Any]:
         """

@@ -4,7 +4,7 @@ import time
 import random
 import logging
 
-from database import Lead, Email, Campaign, DoNotContact, emails_collection
+from database import Lead, Email, Campaign, DoNotContact, emails_collection, leads_collection
 from rocketreach_client import RocketReachClient
 from email_generator import EmailGenerator
 from email_reviewer import EmailReviewer, ReviewStatus, format_review_report
@@ -112,6 +112,128 @@ class CampaignManager:
         print(f"🎯 Campaign created from ICP template: {icp_template}")
         return campaign_id
     
+    def get_pending_leads(self, max_leads: int = 50) -> List[Dict[str, Any]]:
+        """
+        Get leads that have been fetched but never sent an email.
+        
+        These are leads that:
+        1. Exist in the leads collection
+        2. Have NO corresponding email record (or only failed/pending records)
+        3. Are not in the do-not-contact list
+        4. Were created on or after Jan 29, 2026 (after system enhancements)
+        
+        Uses FIFO ordering (oldest first) so no leads are forgotten.
+        
+        Returns:
+            List of leads waiting to be contacted
+        """
+        # Only process leads created after system enhancements (Jan 29, 2026)
+        cutoff_date = datetime(2026, 1, 29, 0, 0, 0)
+        
+        # Get all lead IDs that have been successfully sent an email
+        sent_lead_ids = set(emails_collection.distinct(
+            "lead_id", 
+            {"status": {"$in": ["sent", "opened", "replied"]}}
+        ))
+        
+        # Find leads without sent emails - OLDEST FIRST (FIFO)
+        # Only include leads created after cutoff date
+        pending_leads = []
+        query = {"created_at": {"$gte": cutoff_date}}
+        
+        for lead in leads_collection.find(query).sort("created_at", 1).limit(max_leads * 3):
+            lead_id = str(lead["_id"])
+            email = lead.get("email", "")
+            
+            # Skip if already contacted
+            if lead_id in sent_lead_ids:
+                continue
+            # Skip if no email
+            if not email:
+                continue
+            # Skip if in do-not-contact list
+            if DoNotContact.is_blocked(email):
+                continue
+                
+            pending_leads.append(lead)
+            if len(pending_leads) >= max_leads:
+                break
+        
+        return pending_leads
+    
+    def resume_pending_leads(self, 
+                             max_leads: int = 15, 
+                             dry_run: bool = False) -> Dict[str, Any]:
+        """
+        Resume sending emails to leads that were fetched but never contacted.
+        
+        This ensures no leads are forgotten when campaigns are interrupted
+        (e.g., by sending hour restrictions or rate limits).
+        
+        Returns:
+            Results summary
+        """
+        print(f"\n{'='*60}")
+        print(f"🔄 RESUMING PENDING LEADS")
+        print(f"{'='*60}")
+        
+        pending_leads = self.get_pending_leads(max_leads)
+        
+        if not pending_leads:
+            print("✅ No pending leads found - all leads have been contacted!")
+            return {
+                "resumed": True,
+                "pending_count": 0,
+                "sent": 0,
+                "message": "No pending leads to resume"
+            }
+        
+        print(f"📋 Found {len(pending_leads)} leads waiting to be contacted")
+        
+        # Group by campaign to get proper context
+        leads_by_campaign = {}
+        for lead in pending_leads:
+            campaign_id = lead.get("campaign_id", "unknown")
+            if campaign_id not in leads_by_campaign:
+                leads_by_campaign[campaign_id] = []
+            leads_by_campaign[campaign_id].append(lead)
+        
+        total_sent = 0
+        total_failed = 0
+        
+        for campaign_id, leads in leads_by_campaign.items():
+            # Get campaign context
+            campaign = Campaign.get(campaign_id) if campaign_id != "unknown" else None
+            if campaign:
+                campaign_context = campaign.get("target_criteria", {}).get("campaign_context", {})
+                print(f"\n📧 Processing {len(leads)} leads from campaign: {campaign.get('name', campaign_id)}")
+            else:
+                # Use default context
+                campaign_context = {}
+                print(f"\n📧 Processing {len(leads)} leads (no campaign context)")
+            
+            # Send emails to these leads
+            results = self.send_initial_emails(campaign_id, leads, dry_run=dry_run)
+            total_sent += results.get("sent", 0)
+            total_failed += results.get("failed", 0)
+            
+            # Check if we hit time restriction
+            if results.get("skipped_time", 0) > 0:
+                print(f"   ⏸️ Hit sending hours restriction - will continue later")
+                break
+        
+        print(f"\n{'='*60}")
+        print(f"✅ RESUME COMPLETE: {total_sent} emails sent, {total_failed} failed")
+        print(f"{'='*60}\n")
+        
+        return {
+            "resumed": True,
+            "pending_count": len(pending_leads),
+            "sent": total_sent,
+            "failed": total_failed,
+            "campaigns_processed": len(leads_by_campaign)
+        }
+    
     def run_icp_campaign(self,
                          icp_template: str,
                          max_leads: int = 15,
@@ -177,16 +299,18 @@ class CampaignManager:
     
     def run_autonomous_campaign(self,
                                  max_leads: int = 15,
-                                 dry_run: bool = False) -> Dict[str, Any]:
+                                 dry_run: bool = False,
+                                 resume_pending_first: bool = True) -> Dict[str, Any]:
         """
         FULLY AUTONOMOUS CAMPAIGN EXECUTION
         
         This method requires ZERO human input. It:
-        1. Analyzes historical ICP performance
-        2. Selects the best ICP template automatically
-        3. Fetches leads matching that ICP
-        4. Generates and sends personalized emails
-        5. Tracks everything for future optimization
+        1. FIRST: Checks for pending leads that need to be contacted
+        2. Analyzes historical ICP performance
+        3. Selects the best ICP template automatically
+        4. Fetches leads matching that ICP
+        5. Generates and sends personalized emails
+        6. Tracks everything for future optimization
         
         The system learns over time:
         - High-performing ICPs get more usage
@@ -196,6 +320,7 @@ class CampaignManager:
         Args:
             max_leads: Maximum leads to fetch
             dry_run: If True, generate but don't send
+            resume_pending_first: If True, resume pending leads before new campaigns
         
         Returns:
             Results summary including which ICP was selected and why
@@ -205,6 +330,21 @@ class CampaignManager:
         print(f"\n{'='*60}")
         print(f"🤖 AUTONOMOUS CAMPAIGN - NO HUMAN INPUT REQUIRED")
         print(f"{'='*60}")
+        
+        # STEP 0: Check for pending leads first (leads fetched but never contacted)
+        if resume_pending_first:
+            pending_leads = self.get_pending_leads(max_leads)
+            if pending_leads:
+                print(f"\n⚠️ Found {len(pending_leads)} PENDING LEADS waiting to be contacted!")
+                print(f"   Resuming pending leads before starting new campaign...")
+                
+                resume_results = self.resume_pending_leads(max_leads=max_leads, dry_run=dry_run)
+                
+                # If we sent any emails or hit time limit, return early
+                if resume_results.get("sent", 0) > 0 or resume_results.get("skipped_time", 0) > 0:
+                    resume_results["autonomous"] = True
+                    resume_results["action"] = "resumed_pending_leads"
+                    return resume_results
         
         # Step 1: AI selects the best ICP based on performance data (MongoDB)
         selection = SchedulerConfig.select_icp_for_autonomous_run()
