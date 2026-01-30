@@ -1186,6 +1186,7 @@ class SchedulerConfig:
             "scheduled_campaigns": [
                 {
                     "name": "morning_campaign",
+                    "description": "Morning Autonomous Campaign",
                     "autonomous": True,
                     "schedule_time": "09:30",
                     "days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
@@ -1194,6 +1195,7 @@ class SchedulerConfig:
                 },
                 {
                     "name": "afternoon_campaign",
+                    "description": "Afternoon Autonomous Campaign",
                     "autonomous": True,
                     "schedule_time": "14:30",
                     "days": ["monday", "tuesday", "wednesday", "thursday", "friday"],

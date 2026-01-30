@@ -304,7 +304,8 @@ class AutoScheduler:
         if missed:
             print(f"\n🔄 Found {len(missed)} missed campaign(s) for today - running now...")
             for sc in missed:
-                print(f"   • {sc['description']} (was scheduled for {sc['schedule_time']})")
+                desc = sc.get('description') or 'Autonomous Campaign'
+                print(f"   • {desc} (was scheduled for {sc['schedule_time']})")
                 self._run_scheduled_campaign(sc)
         else:
             print(f"\n✅ No missed campaigns to catch up on")
@@ -338,7 +339,8 @@ class AutoScheduler:
             print(f"\n📅 Scheduled Campaigns ({len(self._scheduled_campaigns)}):")
             for sc in self._scheduled_campaigns:
                 if sc['enabled']:
-                    print(f"   • {sc['description']}")
+                    desc = sc.get('description') or 'Autonomous Campaign'
+                    print(f"   • {desc}")
                     print(f"     → {sc['schedule_time']} {config.TARGET_TIMEZONE} on {', '.join(sc['days'])}")
                     print(f"     → Max {sc['max_leads']} leads per run")
         
@@ -368,7 +370,8 @@ class AutoScheduler:
                 local_dt = target_dt.astimezone(local_tz)
                 local_time_str = local_dt.strftime("%H:%M")
                 
-                print(f"📌 Scheduling '{sc['description'][:30]}...' at {schedule_time_str} EST (= {local_time_str} server time)")
+                desc = sc.get('description') or 'Autonomous Campaign'
+                print(f"📌 Scheduling '{desc[:30]}...' at {schedule_time_str} EST (= {local_time_str} server time)")
                 
                 schedule.every().day.at(local_time_str).do(
                     self._run_scheduled_campaign, sc
@@ -422,10 +425,15 @@ def create_scheduler_from_mongodb() -> AutoScheduler:
     # Load all enabled campaigns from config
     for i, campaign in enumerate(scheduled_campaigns):
         if campaign.get("enabled", True):
+            # Generate a sensible default description if not provided
+            default_desc = campaign.get("name", f"Campaign {i+1}").replace("_", " ").title()
+            if campaign.get("autonomous", True):
+                default_desc = f"{default_desc} (Autonomous)"
+            
             scheduler._scheduled_campaigns.append({
                 "id": i + 1,
                 "name": campaign.get("name", f"campaign_{i+1}"),
-                "description": campaign.get("description"),
+                "description": campaign.get("description") or default_desc,
                 "icp_template": campaign.get("icp_template"),
                 "autonomous": campaign.get("autonomous", True),  # Default to autonomous
                 "schedule_time": campaign.get("schedule_time", "09:00"),
