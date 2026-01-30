@@ -20,6 +20,7 @@ import logging
 
 from database import Email, Lead, Campaign, emails_collection, leads_collection
 from primestrides_context import ICP_TEMPLATES, CASE_STUDIES, COMPANY_CONTEXT
+from email_generator import get_rate_limiter, GROQ_FALLBACK_CHAIN, GROQ_MODEL_LIMITS
 import config
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,74 @@ class ICPManager:
     def __init__(self):
         self.groq_api_key = config.GROQ_API_KEY
         self.llm_model = config.GROQ_MODEL
+        self.rate_limiter = get_rate_limiter()
+        self._groq_client = None
+    
+    @property
+    def groq_client(self):
+        """Lazy load Groq client."""
+        if self._groq_client is None:
+            import groq
+            self._groq_client = groq.Groq(api_key=self.groq_api_key)
+        return self._groq_client
+    
+    def _call_llm(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, json_mode: bool = True) -> str:
+        """
+        Call LLM with automatic model rotation on rate limits.
+        """
+        tried_models = set()
+        last_error = None
+        
+        while True:
+            available_model = self.rate_limiter.get_best_available_model(self.llm_model)
+            
+            if available_model in tried_models:
+                for model in GROQ_FALLBACK_CHAIN:
+                    if model not in tried_models:
+                        available_model = model
+                        break
+                else:
+                    available_model = None
+            
+            if available_model is None:
+                raise last_error or Exception("All Groq models rate limited")
+            
+            tried_models.add(available_model)
+            
+            try:
+                kwargs = {
+                    "model": available_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "temperature": temperature,
+                }
+                if json_mode:
+                    kwargs["response_format"] = {"type": "json_object"}
+                
+                response = self.groq_client.chat.completions.create(**kwargs)
+                
+                tokens_used = 2000
+                if hasattr(response, 'usage') and response.usage:
+                    tokens_used = getattr(response.usage, 'total_tokens', 2000)
+                self.rate_limiter.record_request(available_model, tokens_used)
+                
+                return response.choices[0].message.content
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                last_error = e
+                
+                if 'rate' in error_str and 'limit' in error_str:
+                    data = self.rate_limiter._get_cache(available_model)
+                    limits = GROQ_MODEL_LIMITS.get(available_model, {})
+                    data['tokens_used'] = limits.get('tokens_per_day', 100000)
+                    self.rate_limiter._save_to_db(available_model, data)
+                    logger.warning(f"ICPManager: {available_model} hit rate limit, trying next...")
+                    continue
+                else:
+                    raise
     
     def get_icp_analytics(self, campaign_id: str = None, days: int = 30) -> Dict[str, Any]:
         """
@@ -253,20 +322,10 @@ Remember:
 - Use case studies we actually have"""
 
         try:
-            import groq
-            client = groq.Groq(api_key=self.groq_api_key)
+            # Use _call_llm for automatic model rotation
+            response_content = self._call_llm(system_prompt, user_prompt, temperature=0.7, json_mode=True)
             
-            response = client.chat.completions.create(
-                model=self.llm_model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7,
-                response_format={"type": "json_object"}
-            )
-            
-            result = json.loads(response.choices[0].message.content)
+            result = json.loads(response_content)
             result["generated_at"] = datetime.utcnow().isoformat()
             result["generated_from"] = campaign_goal
             

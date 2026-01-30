@@ -29,6 +29,7 @@ from groq import Groq
 
 from database import leads_collection
 from config import GROQ_API_KEY
+from email_generator import get_rate_limiter, GROQ_FALLBACK_CHAIN, GROQ_MODEL_LIMITS
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -51,6 +52,7 @@ class LeadEnricher:
     
     def __init__(self):
         self.groq_client = Groq(api_key=GROQ_API_KEY)
+        self.rate_limiter = get_rate_limiter()
         self.http_client = httpx.AsyncClient(
             timeout=REQUEST_TIMEOUT,
             follow_redirects=True,
@@ -59,6 +61,60 @@ class LeadEnricher:
             }
         )
         self._domain_last_request: Dict[str, float] = {}
+    
+    def _call_llm(self, prompt: str, temperature: float = 0.3, max_tokens: int = 1000) -> str:
+        """
+        Call LLM with automatic model rotation on rate limits.
+        """
+        tried_models = set()
+        last_error = None
+        
+        while True:
+            # Find an available model
+            available_model = self.rate_limiter.get_best_available_model(ENRICHMENT_MODEL)
+            
+            if available_model in tried_models:
+                for model in GROQ_FALLBACK_CHAIN:
+                    if model not in tried_models:
+                        available_model = model
+                        break
+                else:
+                    available_model = None
+            
+            if available_model is None:
+                raise last_error or Exception("All Groq models rate limited")
+            
+            tried_models.add(available_model)
+            
+            try:
+                response = self.groq_client.chat.completions.create(
+                    model=available_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+                
+                # Record usage
+                tokens_used = 1000
+                if hasattr(response, 'usage') and response.usage:
+                    tokens_used = getattr(response.usage, 'total_tokens', 1000)
+                self.rate_limiter.record_request(available_model, tokens_used)
+                
+                return response.choices[0].message.content
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                last_error = e
+                
+                if 'rate' in error_str and 'limit' in error_str:
+                    data = self.rate_limiter._get_cache(available_model)
+                    limits = GROQ_MODEL_LIMITS.get(available_model, {})
+                    data['tokens_used'] = limits.get('tokens_per_day', 100000)
+                    self.rate_limiter._save_to_db(available_model, data)
+                    logger.warning(f"Enricher: {available_model} hit rate limit, trying next...")
+                    continue
+                else:
+                    raise
     
     async def close(self):
         """Clean up resources."""
@@ -213,14 +269,8 @@ Respond in JSON:
 """
         
         try:
-            response = self.groq_client.chat.completions.create(
-                model=ENRICHMENT_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=1000
-            )
-            
-            content = response.choices[0].message.content
+            # Use _call_llm for automatic model rotation
+            content = self._call_llm(prompt, temperature=0.3, max_tokens=1000)
             
             # Extract JSON from response
             json_match = re.search(r'\{[\s\S]*\}', content)

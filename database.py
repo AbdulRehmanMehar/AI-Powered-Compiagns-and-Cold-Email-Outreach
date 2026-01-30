@@ -13,6 +13,7 @@ leads_collection = db["leads"]
 emails_collection = db["emails"]
 campaigns_collection = db["campaigns"]
 email_reviews_collection = db["email_reviews"]
+groq_limits_collection = db["groq_model_limits"]  # Model limits and usage tracking
 
 # Create indexes
 leads_collection.create_index("email", unique=True)
@@ -21,6 +22,7 @@ emails_collection.create_index("status")
 email_reviews_collection.create_index([("created_at", -1)])
 email_reviews_collection.create_index([("passed", 1)])
 email_reviews_collection.create_index([("email_id", 1)])
+groq_limits_collection.create_index("model", unique=True)
 
 
 def is_valid_first_name(name: str) -> bool:

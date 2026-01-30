@@ -20,7 +20,7 @@ Key guidelines enforced:
 8. NO banned phrases that scream "cold email"
 """
 
-from email_generator import humanize_email, get_llm_client  # Import humanize function and LLM client
+from email_generator import humanize_email, get_llm_client, get_rate_limiter, GROQ_FALLBACK_CHAIN, GROQ_MODEL_LIMITS  # Import humanize function, LLM client, and rotation
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -357,7 +357,10 @@ class EmailReviewer:
     def __init__(self):
         # Use the same LLM client as email_generator (respects LLM_PROVIDER config)
         self.client, self.model, self.provider = get_llm_client()
+        self.rate_limiter = get_rate_limiter() if self.provider == 'groq' else None
         print(f"📋 Email reviewer using: {self.provider.upper()} ({self.model})")
+        if self.rate_limiter:
+            print(f"   ✅ Model rotation enabled (fallback chain active)")
         
         # Thresholds
         self.min_passing_score = 70
@@ -367,6 +370,104 @@ class EmailReviewer:
         self.ideal_word_count_min = 40
         self.ideal_word_count_max = 65
         self.max_subject_words = 4
+    
+    def _call_llm(self, system_prompt: str, user_prompt: str, temperature: float = 0.3, json_mode: bool = True) -> str:
+        """
+        Call the LLM with automatic Groq model fallback (same as EmailGenerator).
+        Returns the response content as string.
+        """
+        # For OpenAI, just make the call directly
+        if self.provider != 'groq' or not self.rate_limiter:
+            kwargs = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": temperature,
+            }
+            if json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
+            response = self.client.chat.completions.create(**kwargs)
+            return response.choices[0].message.content
+        
+        # For Groq, use aggressive fallback - try each model in chain until one works
+        tried_models = set()
+        last_error = None
+        
+        while True:
+            # Find an available model from the fallback chain
+            available_model = self.rate_limiter.get_best_available_model(self.model)
+            
+            # Skip models we've already tried this call
+            if available_model in tried_models:
+                for model in GROQ_FALLBACK_CHAIN:
+                    if model not in tried_models:
+                        available_model = model
+                        break
+                else:
+                    available_model = None
+            
+            if available_model is None:
+                # All Groq models exhausted - fall back to OpenAI if available
+                if getattr(config, 'OPENAI_API_KEY', None):
+                    print(f"   ⚠️ All Groq models exhausted, reviewer falling back to OpenAI")
+                    from openai import OpenAI
+                    openai_client = OpenAI(api_key=config.OPENAI_API_KEY)
+                    openai_model = getattr(config, 'OPENAI_MODEL', 'gpt-4.1-mini')
+                    kwargs = {
+                        "model": openai_model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        "temperature": temperature,
+                    }
+                    if json_mode:
+                        kwargs["response_format"] = {"type": "json_object"}
+                    response = openai_client.chat.completions.create(**kwargs)
+                    return response.choices[0].message.content
+                else:
+                    raise last_error or Exception("All Groq models rate limited and no OpenAI fallback configured")
+            
+            tried_models.add(available_model)
+            
+            try:
+                kwargs = {
+                    "model": available_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "temperature": temperature,
+                }
+                if json_mode:
+                    kwargs["response_format"] = {"type": "json_object"}
+                
+                response = self.client.chat.completions.create(**kwargs)
+                
+                # Record successful request with token usage
+                tokens_used = 2000  # Default estimate
+                if hasattr(response, 'usage') and response.usage:
+                    tokens_used = getattr(response.usage, 'total_tokens', 2000)
+                self.rate_limiter.record_request(available_model, tokens_used)
+                
+                return response.choices[0].message.content
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                last_error = e
+                
+                # If it's a rate limit error, mark this model as exhausted and try next
+                if 'rate' in error_str and 'limit' in error_str:
+                    data = self.rate_limiter._get_cache(available_model)
+                    limits = GROQ_MODEL_LIMITS.get(available_model, {})
+                    data['tokens_used'] = limits.get('tokens_per_day', 100000)
+                    self.rate_limiter._save_to_db(available_model, data)
+                    print(f"   ⚠️ Reviewer: {available_model} hit rate limit, trying next model...")
+                    continue
+                else:
+                    raise
     
     def review_email(self, 
                      email: Dict[str, str],
@@ -948,17 +1049,10 @@ Be harsh but fair. Find everything that could hurt reply rates.
 Pay special attention to whether this sounds human or AI-written."""
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.3,  # Low temp for consistent judgment
-                response_format={"type": "json_object"}
-            )
+            # Use _call_llm for automatic model rotation on rate limits
+            response_content = self._call_llm(system_prompt, user_prompt, temperature=0.3, json_mode=True)
             
-            result = json.loads(response.choices[0].message.content)
+            result = json.loads(response_content)
             
             # Calculate penalty from AI scores
             ai_score = result.get('overall_score', 70)
@@ -1115,17 +1209,10 @@ Fix ALL the issues. Follow LeadGenJay's guidelines EXACTLY:
 - NO em dashes (—) anywhere"""
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.8,
-                response_format={"type": "json_object"}
-            )
+            # Use _call_llm for automatic model rotation on rate limits
+            response_content = self._call_llm(system_prompt, user_prompt, temperature=0.8, json_mode=True)
             
-            result = json.loads(response.choices[0].message.content)
+            result = json.loads(response_content)
             
             # Post-process to remove any AI tells the LLM sneaks in
             subject = humanize_email(result.get("subject", email.get("subject", "")))

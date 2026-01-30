@@ -125,25 +125,48 @@ def humanize_email(text: str) -> str:
 # =============================================================================
 
 # Rate limits by model (requests per day, requests per minute, tokens per day)
-# Groq's actual limit is ~100k tokens/day per model for free tier
-# Updated 2026-01-30 with currently available models from Groq
-GROQ_MODEL_LIMITS = {
-    'llama-3.3-70b-versatile': {'daily': 900, 'per_minute': 25, 'tokens_per_day': 100000},
-    'llama-3.1-8b-instant': {'daily': 14000, 'per_minute': 25, 'tokens_per_day': 500000},
-    'qwen/qwen3-32b': {'daily': 14000, 'per_minute': 25, 'tokens_per_day': 500000},
-    'meta-llama/llama-4-maverick-17b-128e-instruct': {'daily': 14000, 'per_minute': 25, 'tokens_per_day': 500000},
+# Default Groq limits - these are seeded to DB on first run
+# Users should update limits in MongoDB groq_model_limits collection
+DEFAULT_GROQ_LIMITS = {
+    # High capacity models - USE THESE FIRST
+    'groq/compound': {'requests_per_minute': 30, 'requests_per_day': 250, 'tokens_per_minute': 70000, 'tokens_per_day': 10000000, 'priority': 1},
+    'groq/compound-mini': {'requests_per_minute': 30, 'requests_per_day': 250, 'tokens_per_minute': 70000, 'tokens_per_day': 10000000, 'priority': 2},
+    'llama-3.1-8b-instant': {'requests_per_minute': 30, 'requests_per_day': 14400, 'tokens_per_minute': 6000, 'tokens_per_day': 500000, 'priority': 3},
+    
+    # Medium capacity models
+    'llama-3.3-70b-versatile': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 12000, 'tokens_per_day': 100000, 'priority': 4},
+    'qwen/qwen3-32b': {'requests_per_minute': 60, 'requests_per_day': 1000, 'tokens_per_minute': 6000, 'tokens_per_day': 500000, 'priority': 5},
+    'meta-llama/llama-4-maverick-17b-128e-instruct': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 6000, 'tokens_per_day': 500000, 'priority': 6},
+    'meta-llama/llama-4-scout-17b-16e-instruct': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 30000, 'tokens_per_day': 500000, 'priority': 7},
+    
+    # Guard/utility models
+    'meta-llama/llama-guard-4-12b': {'requests_per_minute': 30, 'requests_per_day': 14400, 'tokens_per_minute': 15000, 'tokens_per_day': 500000, 'priority': 10},
+    'meta-llama/llama-prompt-guard-2-22m': {'requests_per_minute': 30, 'requests_per_day': 14400, 'tokens_per_minute': 15000, 'tokens_per_day': 500000, 'priority': 11},
+    'meta-llama/llama-prompt-guard-2-86m': {'requests_per_minute': 30, 'requests_per_day': 14400, 'tokens_per_minute': 15000, 'tokens_per_day': 500000, 'priority': 12},
+    
+    # Other models
+    'allam-2-7b': {'requests_per_minute': 30, 'requests_per_day': 7000, 'tokens_per_minute': 6000, 'tokens_per_day': 500000, 'priority': 8},
+    'moonshotai/kimi-k2-instruct': {'requests_per_minute': 60, 'requests_per_day': 1000, 'tokens_per_minute': 10000, 'tokens_per_day': 300000, 'priority': 9},
+    'moonshotai/kimi-k2-instruct-0905': {'requests_per_minute': 60, 'requests_per_day': 1000, 'tokens_per_minute': 10000, 'tokens_per_day': 300000, 'priority': 9},
+    'openai/gpt-oss-120b': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 8000, 'tokens_per_day': 200000, 'priority': 13},
+    'openai/gpt-oss-20b': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 8000, 'tokens_per_day': 200000, 'priority': 14},
+    'openai/gpt-oss-safeguard-20b': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 8000, 'tokens_per_day': 200000, 'priority': 15},
 }
 
-# Aggressive fallback chain - distribute load across models
-# Strategy: Use high-quality models first, with aggressive fallback to others
-# Updated 2026-01-30 - removed decommissioned models
+# Fallback chain for chat completions (ordered by quality, then capacity)
+# Strategy: Prioritize quality for cold emails, use smaller models only as last resort
 GROQ_FALLBACK_CHAIN = [
-    'llama-3.3-70b-versatile',                         # Best quality (100k tokens/day)
-    'qwen/qwen3-32b',                                   # Good 32B model (500k tokens/day)
-    'meta-llama/llama-4-maverick-17b-128e-instruct',   # Llama 4 17B (500k tokens/day)
-    'llama-3.1-8b-instant',                            # Fast 8B model (500k tokens/day) - last resort
-    'llama-3.1-8b-instant',       # POOR quality - last resort only (14.4K/day)
+    'groq/compound',                                    # Best quality - unlimited tokens!
+    'groq/compound-mini',                               # Good quality - unlimited tokens!
+    'llama-3.3-70b-versatile',                         # High quality 70B (1K/day, 100K tokens)
+    'qwen/qwen3-32b',                                  # Good 32B model (1K/day, 500K tokens)
+    'meta-llama/llama-4-maverick-17b-128e-instruct',  # Llama 4 17B (1K/day, 500K tokens)
+    'meta-llama/llama-4-scout-17b-16e-instruct',      # Llama 4 Scout (1K/day, 500K tokens)
+    'llama-3.1-8b-instant',                            # LAST RESORT - fast but lower quality (14.4K/day)
 ]
+
+# Legacy compatibility
+GROQ_MODEL_LIMITS = {k: {'daily': v['requests_per_day'], 'per_minute': v['requests_per_minute'], 'tokens_per_day': v['tokens_per_day']} for k, v in DEFAULT_GROQ_LIMITS.items()}
 
 # In-memory cache (synced with DB periodically)
 _rate_limit_cache = {}
@@ -156,77 +179,168 @@ class GroqRateLimiter:
     Rate limiter for Groq API with MongoDB persistence and model fallback.
     
     Features:
-    - Stores usage in MongoDB for persistence across restarts
+    - Stores limits AND usage in MongoDB (groq_model_limits collection)
+    - Automatically seeds default limits on first run
     - Automatically falls back to other Groq models when rate limited
     - In-memory cache to reduce DB reads
-    - Per-model tracking
+    - Per-model tracking with daily reset
+    
+    Collection schema (groq_model_limits):
+    {
+        "model": "groq/compound",
+        "requests_per_minute": 30,
+        "requests_per_day": 250,
+        "tokens_per_minute": 70000,
+        "tokens_per_day": 10000000,
+        "priority": 1,
+        "enabled": true,
+        "usage": {
+            "date": "2026-01-30",
+            "requests_today": 150,
+            "tokens_today": 45000,
+            "minute_requests": [timestamps...]
+        }
+    }
     """
     
     def __init__(self):
         self._db = None
-        self._collection = None
-        self._cache = {}  # {model: {'daily_count': int, 'minute_requests': [timestamps], 'date': str}}
+        self._limits_collection = None
+        self._cache = {}  # {model: {limits + usage}}
+        self._cache_time = {}  # {model: timestamp}
+        self._initialized = False
     
     @property
     def db(self):
         """Lazy load database connection"""
         if self._db is None:
-            from database import db
+            from database import db, groq_limits_collection
             self._db = db
-            self._collection = db.llm_usage
-            # Create index for efficient queries
-            self._collection.create_index([("model", 1), ("date", 1)], unique=True)
-        return self._collection
+            self._limits_collection = groq_limits_collection
+            if not self._initialized:
+                self._seed_defaults()
+                self._initialized = True
+        return self._limits_collection
+    
+    def _seed_defaults(self):
+        """Seed default limits to database if not exists"""
+        for model, limits in DEFAULT_GROQ_LIMITS.items():
+            try:
+                existing = self._limits_collection.find_one({"model": model})
+                if not existing:
+                    doc = {
+                        "model": model,
+                        **limits,
+                        "enabled": True,
+                        "usage": {
+                            "date": self._get_today(),
+                            "requests_today": 0,
+                            "tokens_today": 0,
+                            "minute_requests": []
+                        },
+                        "created_at": datetime.datetime.utcnow(),
+                        "updated_at": datetime.datetime.utcnow()
+                    }
+                    self._limits_collection.insert_one(doc)
+            except Exception as e:
+                pass  # Ignore errors (e.g., duplicate key)
     
     def _get_today(self) -> str:
         """Get today's date as string"""
         return datetime.date.today().isoformat()
     
-    def _load_from_db(self, model: str) -> dict:
-        """Load usage data from MongoDB"""
+    def _load_model(self, model: str) -> dict:
+        """Load model limits and usage from MongoDB"""
         today = self._get_today()
         try:
-            doc = self.db.find_one({"model": model, "date": today})
+            doc = self.db.find_one({"model": model})
             if doc:
+                usage = doc.get('usage', {})
+                # Reset daily usage if it's a new day
+                if usage.get('date') != today:
+                    usage = {
+                        "date": today,
+                        "requests_today": 0,
+                        "tokens_today": 0,
+                        "minute_requests": []
+                    }
+                    self._save_usage(model, usage)
+                
                 return {
-                    'daily_count': doc.get('daily_count', 0),
-                    'tokens_used': doc.get('tokens_used', 0),
-                    'minute_requests': doc.get('minute_requests', []),
-                    'date': today
+                    'model': model,
+                    'requests_per_minute': doc.get('requests_per_minute', 30),
+                    'requests_per_day': doc.get('requests_per_day', 1000),
+                    'tokens_per_minute': doc.get('tokens_per_minute', 6000),
+                    'tokens_per_day': doc.get('tokens_per_day', 100000),
+                    'priority': doc.get('priority', 99),
+                    'enabled': doc.get('enabled', True),
+                    'usage': usage
                 }
         except Exception as e:
-            print(f"   ⚠️ Error loading rate limit from DB: {e}")
+            print(f"   ⚠️ Error loading model {model} from DB: {e}")
         
-        return {'daily_count': 0, 'tokens_used': 0, 'minute_requests': [], 'date': today}
+        # Fallback to defaults if not in DB
+        defaults = DEFAULT_GROQ_LIMITS.get(model, {})
+        return {
+            'model': model,
+            'requests_per_minute': defaults.get('requests_per_minute', 30),
+            'requests_per_day': defaults.get('requests_per_day', 1000),
+            'tokens_per_minute': defaults.get('tokens_per_minute', 6000),
+            'tokens_per_day': defaults.get('tokens_per_day', 100000),
+            'priority': defaults.get('priority', 99),
+            'enabled': True,
+            'usage': {"date": today, "requests_today": 0, "tokens_today": 0, "minute_requests": []}
+        }
     
-    def _save_to_db(self, model: str, data: dict):
+    def _save_usage(self, model: str, usage: dict):
         """Save usage data to MongoDB"""
-        today = self._get_today()
         try:
             self.db.update_one(
-                {"model": model, "date": today},
-                {"$set": {
-                    "daily_count": data['daily_count'],
-                    "tokens_used": data.get('tokens_used', 0),
-                    "minute_requests": data['minute_requests'][-100:],  # Keep last 100 timestamps
-                    "updated_at": datetime.datetime.utcnow()
-                }},
+                {"model": model},
+                {"$set": {"usage": usage, "updated_at": datetime.datetime.utcnow()}},
                 upsert=True
             )
         except Exception as e:
-            print(f"   ⚠️ Error saving rate limit to DB: {e}")
+            print(f"   ⚠️ Error saving usage for {model}: {e}")
     
+    # Legacy compatibility methods
     def _get_cache(self, model: str) -> dict:
+        """Legacy method - maps to new structure"""
+        data = self._get_cached(model)
+        usage = data.get('usage', {})
+        return {
+            'daily_count': usage.get('requests_today', 0),
+            'tokens_used': usage.get('tokens_today', 0),
+            'minute_requests': usage.get('minute_requests', []),
+            'date': usage.get('date', self._get_today())
+        }
+    
+    def _save_to_db(self, model: str, data: dict):
+        """Legacy method - maps to new structure"""
+        usage = {
+            "date": data.get('date', self._get_today()),
+            "requests_today": data.get('daily_count', 0),
+            "tokens_today": data.get('tokens_used', 0),
+            "minute_requests": data.get('minute_requests', [])[-100:]
+        }
+        self._save_usage(model, usage)
+    
+    def _get_cached(self, model: str) -> dict:
         """Get cached data for a model, loading from DB if needed"""
+        now = time.time()
         today = self._get_today()
         
-        # Check if cache is valid
-        if model in self._cache and self._cache[model].get('date') == today:
-            return self._cache[model]
+        # Check if cache is valid (30 second TTL)
+        if model in self._cache:
+            cache_age = now - self._cache_time.get(model, 0)
+            cache_date = self._cache[model].get('usage', {}).get('date')
+            if cache_age < DB_SYNC_INTERVAL and cache_date == today:
+                return self._cache[model]
         
         # Load from DB
-        data = self._load_from_db(model)
+        data = self._load_model(model)
         self._cache[model] = data
+        self._cache_time[model] = now
         return data
     
     def check_limit(self, model: str) -> tuple:
@@ -234,40 +348,73 @@ class GroqRateLimiter:
         Check if model is within rate limits.
         Returns (can_proceed, wait_seconds, reason)
         """
-        limits = GROQ_MODEL_LIMITS.get(model, {'daily': 900, 'per_minute': 25, 'tokens_per_day': 100000})
-        data = self._get_cache(model)
+        data = self._get_cached(model)
+        
+        if not data.get('enabled', True):
+            return False, 0, "disabled"
+        
+        usage = data.get('usage', {})
         now = time.time()
         
         # Check daily request limit
-        if data['daily_count'] >= limits['daily']:
+        requests_today = usage.get('requests_today', 0)
+        if requests_today >= data['requests_per_day']:
             return False, 0, "daily_limit"
         
-        # Check estimated token limit (estimate ~2000 tokens per request for safety)
-        tokens_used = data.get('tokens_used', 0)
-        token_limit = limits.get('tokens_per_day', 100000)
-        if tokens_used >= token_limit * 0.95:  # Leave 5% buffer
+        # Check daily token limit (leave 5% buffer, skip for "unlimited" 10M+)
+        tokens_today = usage.get('tokens_today', 0)
+        token_limit = data['tokens_per_day']
+        if token_limit < 10000000 and tokens_today >= token_limit * 0.95:
             return False, 0, "token_limit"
         
         # Clean old minute requests
-        data['minute_requests'] = [t for t in data['minute_requests'] if now - t < 60]
+        minute_requests = [t for t in usage.get('minute_requests', []) if now - t < 60]
+        usage['minute_requests'] = minute_requests
         
         # Check per-minute limit
-        if len(data['minute_requests']) >= limits['per_minute']:
-            wait_time = 60 - (now - data['minute_requests'][0])
+        if len(minute_requests) >= data['requests_per_minute']:
+            wait_time = 60 - (now - minute_requests[0])
             return False, max(0, wait_time), "minute_limit"
         
         return True, 0, "ok"
     
     def record_request(self, model: str, tokens_used: int = 2000):
-        """Record a successful API request with estimated token usage"""
-        data = self._get_cache(model)
-        data['daily_count'] += 1
-        data['tokens_used'] = data.get('tokens_used', 0) + tokens_used
-        data['minute_requests'].append(time.time())
+        """Record a successful API request with token usage"""
+        data = self._get_cached(model)
+        usage = data.get('usage', {})
         
-        # Save to DB periodically (every 5 requests to reduce writes)
-        if data['daily_count'] % 5 == 0:
-            self._save_to_db(model, data)
+        usage['requests_today'] = usage.get('requests_today', 0) + 1
+        usage['tokens_today'] = usage.get('tokens_today', 0) + tokens_used
+        usage['minute_requests'] = usage.get('minute_requests', []) + [time.time()]
+        usage['date'] = self._get_today()
+        
+        data['usage'] = usage
+        self._cache[model] = data
+        
+        # Save to DB periodically (every 5 requests)
+        if usage['requests_today'] % 5 == 0:
+            self._save_usage(model, usage)
+    
+    def get_all_models(self) -> list:
+        """Get all models with their limits and usage from DB"""
+        try:
+            return list(self.db.find({}, {"_id": 0}).sort("priority", 1))
+        except Exception as e:
+            return []
+    
+    def update_model_limits(self, model: str, limits: dict):
+        """Update limits for a model in the database"""
+        try:
+            self.db.update_one(
+                {"model": model},
+                {"$set": {**limits, "updated_at": datetime.datetime.utcnow()}},
+                upsert=True
+            )
+            if model in self._cache:
+                del self._cache[model]
+            print(f"   ✅ Updated limits for {model}")
+        except Exception as e:
+            print(f"   ❌ Error updating limits: {e}")
     
     def get_best_available_model(self, preferred_model: str = None) -> Optional[str]:
         """
@@ -275,37 +422,52 @@ class GroqRateLimiter:
         AGGRESSIVE: Distributes load across models to avoid hitting any single model's limit.
         Returns None if all models are rate limited.
         """
-        chain = GROQ_FALLBACK_CHAIN.copy()
+        # Get all enabled models sorted by priority
+        try:
+            all_models = self.get_all_models()
+            enabled_models = [m for m in all_models if m.get('enabled', True)]
+        except:
+            enabled_models = []
         
-        # Get usage stats for smart selection
+        # Build chain: use DB models if available, else fallback to hardcoded
+        if enabled_models:
+            # Score by: remaining capacity, then priority
+            def score_model(m):
+                usage = m.get('usage', {})
+                tokens_used = usage.get('tokens_today', 0)
+                token_limit = m.get('tokens_per_day', 100000)
+                usage_pct = (tokens_used / token_limit * 100) if token_limit > 0 else 0
+                priority = m.get('priority', 99)
+                return (usage_pct > 80, priority, usage_pct)
+            
+            enabled_models.sort(key=score_model)
+            chain = [m['model'] for m in enabled_models]
+        else:
+            chain = GROQ_FALLBACK_CHAIN.copy()
+        
+        # Get usage stats for logging
         model_stats = {}
         for model in chain:
-            data = self._get_cache(model)
-            limits = GROQ_MODEL_LIMITS.get(model, {'tokens_per_day': 100000})
-            tokens_used = data.get('tokens_used', 0)
-            token_limit = limits.get('tokens_per_day', 100000)
-            usage_percent = (tokens_used / token_limit) * 100 if token_limit > 0 else 100
-            model_stats[model] = usage_percent
+            data = self._get_cached(model)
+            usage = data.get('usage', {})
+            tokens_used = usage.get('tokens_today', 0)
+            token_limit = data.get('tokens_per_day', 100000)
+            model_stats[model] = (tokens_used / token_limit * 100) if token_limit > 0 else 0
         
-        # AGGRESSIVE STRATEGY: Prefer the model with the most capacity remaining
-        # Sort by usage percentage (lowest first)
-        sorted_models = sorted(chain, key=lambda m: model_stats.get(m, 100))
-        
-        # If preferred model has < 80% usage, still use it for quality
+        # If preferred model has < 80% usage, prioritize it
         if preferred_model and model_stats.get(preferred_model, 100) < 80:
-            sorted_models.remove(preferred_model)
-            sorted_models.insert(0, preferred_model)
+            if preferred_model in chain:
+                chain.remove(preferred_model)
+            chain.insert(0, preferred_model)
         
-        for model in sorted_models:
+        for model in chain:
             can_proceed, wait_time, reason = self.check_limit(model)
             if can_proceed:
-                # Log when using fallback
-                if model != (preferred_model or GROQ_FALLBACK_CHAIN[0]):
+                if model != (preferred_model or chain[0]) and preferred_model:
                     usage = model_stats.get(model, 0)
                     print(f"   🔄 Using {model} ({usage:.0f}% capacity used)")
                 return model
             elif reason == "minute_limit" and wait_time < 5:
-                # Short wait is acceptable
                 time.sleep(wait_time + 0.5)
                 return model
         
@@ -314,21 +476,35 @@ class GroqRateLimiter:
     def get_usage_stats(self) -> dict:
         """Get current usage statistics for all models including token usage"""
         stats = {}
-        today = self._get_today()
         
-        for model, limits in GROQ_MODEL_LIMITS.items():
-            data = self._get_cache(model)
-            token_limit = limits.get('tokens_per_day', 100000)
-            tokens_used = data.get('tokens_used', 0)
+        # Get all models from DB, fallback to hardcoded
+        try:
+            all_models = self.get_all_models()
+            if not all_models:
+                all_models = [{'model': m, **DEFAULT_GROQ_LIMITS.get(m, {})} for m in GROQ_FALLBACK_CHAIN]
+        except:
+            all_models = [{'model': m, **DEFAULT_GROQ_LIMITS.get(m, {})} for m in GROQ_FALLBACK_CHAIN]
+        
+        for m in all_models:
+            model = m['model']
+            data = self._get_cached(model)
+            usage = data.get('usage', {})
+            
+            token_limit = data.get('tokens_per_day', 100000)
+            tokens_used = usage.get('tokens_today', 0)
+            requests_limit = data.get('requests_per_day', 1000)
+            requests_used = usage.get('requests_today', 0)
             
             stats[model] = {
-                'daily_used': data['daily_count'],
-                'daily_limit': limits['daily'],
-                'daily_remaining': limits['daily'] - data['daily_count'],
+                'requests_today': requests_used,
+                'requests_limit': requests_limit,
+                'requests_remaining': requests_limit - requests_used,
                 'tokens_used': tokens_used,
                 'tokens_limit': token_limit,
-                'tokens_remaining': token_limit - tokens_used,
-                'percent_used': round(tokens_used / token_limit * 100, 1) if token_limit > 0 else 0
+                'tokens_remaining': max(0, token_limit - tokens_used),
+                'percent_used': round(tokens_used / token_limit * 100, 1) if token_limit > 0 else 0,
+                'enabled': data.get('enabled', True),
+                'priority': data.get('priority', 99)
             }
         
         return stats
@@ -336,7 +512,8 @@ class GroqRateLimiter:
     def flush_to_db(self):
         """Force save all cached data to DB"""
         for model, data in self._cache.items():
-            self._save_to_db(model, data)
+            usage = data.get('usage', {})
+            self._save_usage(model, usage)
 
 
 # Global rate limiter instance
