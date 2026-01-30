@@ -639,9 +639,35 @@ Your Automation System"""
         }
     
     def connect(self):
-        """Legacy method - connects first account for backward compatibility"""
-        if self.accounts:
-            return self._get_connection(self.accounts[0]) is not None
+        """
+        Try to connect to at least one available account.
+        Returns True if any account can connect, False if all fail.
+        """
+        if not self.accounts:
+            return False
+        
+        # Try to connect to any available account (not blocked, not at limit)
+        from database import BlockedAccounts
+        
+        for account in self.accounts:
+            email = account["email"]
+            
+            # Skip blocked accounts
+            if BlockedAccounts.is_blocked(email):
+                continue
+            
+            # Skip accounts at daily limit
+            can_send, _, _ = self._can_account_send(email)
+            if not can_send:
+                continue
+            
+            # Try to connect
+            connection = self._get_connection(account)
+            if connection is not None:
+                return True
+        
+        # No accounts available or all failed to connect
+        print("   ⚠️  No email accounts available (all blocked, at limit, or connection failed)")
         return False
     
     def disconnect(self):

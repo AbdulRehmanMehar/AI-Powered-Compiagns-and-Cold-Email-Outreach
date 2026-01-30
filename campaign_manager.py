@@ -204,6 +204,12 @@ class CampaignManager:
         for campaign_id, leads in leads_by_campaign.items():
             # Get campaign context
             campaign = Campaign.get_by_id(campaign_id) if campaign_id and campaign_id != "unknown" else None
+            
+            # If campaign was deleted, treat as orphan leads
+            if campaign is None and campaign_id != "unknown":
+                print(f"\n⚠️  Campaign {campaign_id} no longer exists - treating leads as orphans")
+                campaign_id = "unknown"
+            
             if campaign:
                 campaign_context = campaign.get("target_criteria", {}).get("campaign_context", {})
                 print(f"\n📧 Processing {len(leads)} leads from campaign: {campaign.get('name', campaign_id)}")
@@ -604,10 +610,9 @@ class CampaignManager:
             "details": []
         }
         
-        # Connect to SMTP server
-        if not dry_run:
-            if not self.email_sender.connect():
-                return {"error": "Failed to connect to email server"}
+        # Note: No upfront connect() check needed - send_email() handles connections
+        # per-email with automatic rotation. This prevents false failures when one
+        # account temporarily fails but others are available.
         
         try:
             for lead in leads:
@@ -894,10 +899,9 @@ class CampaignManager:
         
         print(f"Found {len(pending_followups)} leads needing follow-up")
         
-        # Connect to SMTP server
-        if not dry_run:
-            if not self.email_sender.connect():
-                return {"error": "Failed to connect to email server"}
+        # Note: No upfront connect() check needed - send_email() handles connections
+        # per-email with automatic rotation. This prevents false failures when one
+        # account temporarily fails but others are available.
         
         try:
             for followup_data in pending_followups:
