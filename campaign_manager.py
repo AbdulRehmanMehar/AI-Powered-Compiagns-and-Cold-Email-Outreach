@@ -203,12 +203,12 @@ class CampaignManager:
         
         for campaign_id, leads in leads_by_campaign.items():
             # Get campaign context
-            campaign = Campaign.get(campaign_id) if campaign_id != "unknown" else None
+            campaign = Campaign.get_by_id(campaign_id) if campaign_id and campaign_id != "unknown" else None
             if campaign:
                 campaign_context = campaign.get("target_criteria", {}).get("campaign_context", {})
                 print(f"\n📧 Processing {len(leads)} leads from campaign: {campaign.get('name', campaign_id)}")
             else:
-                # Use default context
+                # Use default context for orphan leads
                 campaign_context = {}
                 print(f"\n📧 Processing {len(leads)} leads (no campaign context)")
             
@@ -493,12 +493,12 @@ class CampaignManager:
         # Fetch from RocketReach (pass exclude list to skip at source)
         raw_leads = self.rocketreach.fetch_leads(criteria, max_leads, exclude_emails=contacted_emails)
         
-        # Save to database
+        # Save to database with campaign association
         saved_leads = []
         for lead_data in raw_leads:
             email = lead_data.get("email")
             if email:
-                lead_id = Lead.create(lead_data)
+                lead_id = Lead.create(lead_data, campaign_id=campaign_id)
                 lead = Lead.get_by_id(lead_id)
                 saved_leads.append(lead)
         
@@ -569,18 +569,27 @@ class CampaignManager:
         Send initial emails to leads in a campaign
         
         Args:
-            campaign_id: Campaign ID
+            campaign_id: Campaign ID (can be "unknown" for orphan leads)
             leads: List of leads (if None, fetches all leads for campaign)
             dry_run: If True, generate emails but don't send
         
         Returns:
             Results summary
         """
-        campaign = Campaign.get_by_id(campaign_id)
-        if not campaign:
-            raise ValueError(f"Campaign not found: {campaign_id}")
-        
-        campaign_context = campaign.get("target_criteria", {}).get("campaign_context", {})
+        # Handle orphan leads (no campaign association)
+        if campaign_id == "unknown" or campaign_id is None:
+            campaign = None
+            campaign_context = {}
+            # Create a temporary campaign for tracking purposes
+            from bson import ObjectId
+            temp_campaign_id = str(ObjectId())
+            campaign_id = temp_campaign_id
+            print(f"   📝 Created temporary campaign ID for orphan leads: {campaign_id[:8]}...")
+        else:
+            campaign = Campaign.get_by_id(campaign_id)
+            if not campaign:
+                raise ValueError(f"Campaign not found: {campaign_id}")
+            campaign_context = campaign.get("target_criteria", {}).get("campaign_context", {})
         
         if leads is None:
             leads = Lead.get_all()

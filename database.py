@@ -115,8 +115,13 @@ class Lead:
     """Lead/Contact model"""
     
     @staticmethod
-    def create(data: Dict[str, Any]) -> str:
-        """Create or update a lead"""
+    def create(data: Dict[str, Any], campaign_id: str = None) -> str:
+        """Create or update a lead
+        
+        Args:
+            data: Lead data from RocketReach or other source
+            campaign_id: Optional campaign ID to associate with this lead
+        """
         # Extract and validate first_name
         full_name = data.get("name") or data.get("full_name") or ""
         email = data.get("email") or ""
@@ -141,6 +146,8 @@ class Lead:
             "rocketreach_id": data.get("id"),
             "raw_data": data,
             "updated_at": datetime.utcnow(),
+            # Campaign association - which campaign fetched this lead
+            "campaign_id": campaign_id or data.get("campaign_id"),
             # ICP Tracking (TK Kader Framework)
             "is_icp": data.get("is_icp"),  # True/False - core classification
             "icp_template": data.get("icp_template"),  # Which template matched

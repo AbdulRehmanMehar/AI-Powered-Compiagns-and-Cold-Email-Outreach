@@ -139,18 +139,9 @@ DEFAULT_GROQ_LIMITS = {
     'meta-llama/llama-4-maverick-17b-128e-instruct': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 6000, 'tokens_per_day': 500000, 'priority': 6},
     'meta-llama/llama-4-scout-17b-16e-instruct': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 30000, 'tokens_per_day': 500000, 'priority': 7},
     
-    # Guard/utility models
-    'meta-llama/llama-guard-4-12b': {'requests_per_minute': 30, 'requests_per_day': 14400, 'tokens_per_minute': 15000, 'tokens_per_day': 500000, 'priority': 10},
-    'meta-llama/llama-prompt-guard-2-22m': {'requests_per_minute': 30, 'requests_per_day': 14400, 'tokens_per_minute': 15000, 'tokens_per_day': 500000, 'priority': 11},
-    'meta-llama/llama-prompt-guard-2-86m': {'requests_per_minute': 30, 'requests_per_day': 14400, 'tokens_per_minute': 15000, 'tokens_per_day': 500000, 'priority': 12},
-    
-    # Other models
-    'allam-2-7b': {'requests_per_minute': 30, 'requests_per_day': 7000, 'tokens_per_minute': 6000, 'tokens_per_day': 500000, 'priority': 8},
-    'moonshotai/kimi-k2-instruct': {'requests_per_minute': 60, 'requests_per_day': 1000, 'tokens_per_minute': 10000, 'tokens_per_day': 300000, 'priority': 9},
-    'moonshotai/kimi-k2-instruct-0905': {'requests_per_minute': 60, 'requests_per_day': 1000, 'tokens_per_minute': 10000, 'tokens_per_day': 300000, 'priority': 9},
-    'openai/gpt-oss-120b': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 8000, 'tokens_per_day': 200000, 'priority': 13},
-    'openai/gpt-oss-20b': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 8000, 'tokens_per_day': 200000, 'priority': 14},
-    'openai/gpt-oss-safeguard-20b': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 8000, 'tokens_per_day': 200000, 'priority': 15},
+    # NOTE: Guard/utility models and other experimental models removed
+    # They were either blocked at org level or not suitable for email generation
+    # Only keeping models that are tested and working for our use case
 }
 
 # Fallback chain for chat completions (ordered by quality, then capacity)
