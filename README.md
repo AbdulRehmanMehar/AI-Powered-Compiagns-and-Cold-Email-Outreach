@@ -1,205 +1,633 @@
 # Cold Email Automation System
 
-A fully automated cold email outreach system using AI-powered email generation, RocketReach for lead discovery, and multi-account Zoho for sending. Based on expert cold email strategies from Eric Nowoslawski and LeadGenJay.
+A **fully autonomous** cold email outreach system that requires **ZERO human input**. Uses AI-powered ICP selection, RocketReach for lead discovery, and multi-account Zoho for sending. Based on LeadGenJay's framework and TK Kader's ICP methodology.
+
+## 🚀 What Makes This Different
+
+**Traditional cold email systems** require you to:
+- Manually define target audiences
+- Write campaign descriptions
+- Decide which ICP to target today
+- Monitor and adjust based on results
+
+**This system** does ALL of that automatically:
+- 🤖 **AI selects the best ICP** based on historical performance data
+- 📊 **Learns over time** - high-performing ICPs get more usage
+- 🔄 **Rotates intelligently** - avoids audience burnout
+- 🎯 **Tracks everything** - ICP performance, reply rates, conversions
+
+---
 
 ## Features
 
-- 🔍 **RocketReach Integration**: Search and fetch leads based on job titles, keywords, locations
-- 🤖 **AI-Powered Emails**: Groq LLM (with fallback chain) generates personalized emails following expert strategies
-- � **Self-Improving AI**: Reviews learn from past failures and automatically improve email quality
-- ✅ **Quality Gate**: AI reviewer scores emails against LeadGenJay guidelines before sending
-- 📧 **Multi-Account Zoho**: Rotates across email accounts for higher deliverability
-- 🔄 **Smart Follow-ups**: Day 3 (same thread) + Day 6 (new thread with different angle)
-- 📊 **Campaign Management**: Track campaigns, leads, and email statistics
-- 💾 **MongoDB Storage**: Persists all data for tracking and deduplication
-- ⏰ **Fully Automated**: Runs on schedule with no manual intervention
-- 🛡️ **Global Deduplication**: Never emails the same person twice across any campaign
-- ✅ **Email Verification**: Multi-layer verification (syntax, MX, SMTP) reduces bounces to ~0%
-- 🔄 **LLM Fallback Chain**: 28,900 requests/day capacity with Groq model rotation
-- 🐳 **Dockerized**: Ready for Portainer deployment
-- 🧠 **Human-Sounding**: Detects and removes AI writing patterns (em dashes, corporate words)
+- 🤖 **Fully Autonomous**: AI selects ICP, generates campaigns, sends emails - no human input
+- 🎯 **ICP Framework**: TK Kader's methodology - 10x better, data-backed, tracked through GTM
+- 📊 **Performance Learning**: Multi-armed bandit algorithm balances exploration vs exploitation
+- 🔍 **RocketReach Integration**: Automatic lead sourcing based on ICP criteria
+- ✍️ **LeadGenJay Emails**: 4-line framework, under 75 words, question-based pain points
+- ✅ **Quality Gate**: AI reviewer scores emails before sending
+- 📧 **Multi-Account Zoho**: Rotates across 8 email accounts for deliverability
+- 🔄 **Smart Follow-ups**: Day 3 (same thread) + Day 6 (new thread, different angle)
+- 🧵 **Email Threading**: Proper Message-ID/In-Reply-To headers for thread grouping
+- 🛡️ **Global Deduplication**: Never emails same person twice across ANY campaign
+- ✅ **Email Verification**: MX + SMTP verification reduces bounces to ~0%
+- 💾 **MongoDB Storage**: All config, campaigns, leads, analytics in database
+- 🐳 **Dockerized**: Ready for production deployment
 
 ---
 
 ## Quick Start
 
-### 1. Configure Environment
+### Option 1: Fully Autonomous (Recommended)
 
 ```bash
+# 1. Configure environment
 cp .env.example .env
-# Edit .env with your credentials (see Configuration section below)
+# Edit .env with your credentials
+
+# 2. Start the system - it handles everything else
+python auto_scheduler.py
 ```
 
-### 2. Configure Campaign Schedule
+That's it! The system will:
+- Initialize default config in MongoDB
+- Select best ICP based on performance data
+- Create campaigns automatically
+- Fetch leads from RocketReach
+- Generate and send emails
+- Track results and learn
+
+### Option 2: Docker Deployment
 
 ```bash
-cp scheduler_config.example.json scheduler_config.json
+docker compose up -d
 ```
 
-Edit `scheduler_config.json` to define your campaigns:
+---
+
+## System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     FULLY AUTONOMOUS COLD EMAIL SYSTEM                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
+│   MongoDB        │     │  Auto Scheduler  │     │   ICP Manager    │
+│   ─────────────  │◄───►│  ─────────────── │◄───►│   ────────────── │
+│   • Config       │     │  • Runs on time  │     │  • Selects ICP   │
+│   • ICP History  │     │  • Catches up    │     │  • Tracks perf   │
+│   • Analytics    │     │  • Autonomous    │     │  • Learns        │
+└──────────────────┘     └────────┬─────────┘     └──────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         CAMPAIGN EXECUTION FLOW                              │
+│                                                                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
+│  │ 1. SELECT   │───►│ 2. CREATE   │───►│ 3. FETCH    │───►│ 4. VERIFY   │  │
+│  │    ICP      │    │   CAMPAIGN  │    │   LEADS     │    │   EMAILS    │  │
+│  │             │    │             │    │             │    │             │  │
+│  │ AI picks    │    │ From ICP    │    │ RocketReach │    │ MX + SMTP   │  │
+│  │ best ICP    │    │ template    │    │ with ICP    │    │ validation  │  │
+│  └─────────────┘    └─────────────┘    │ criteria    │    └─────────────┘  │
+│                                        └─────────────┘                      │
+│                                                                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
+│  │ 5. ENRICH   │───►│ 6. CLASSIFY │───►│ 7. GENERATE │───►│ 8. REVIEW   │  │
+│  │    LEADS    │    │    ICP      │    │   EMAIL     │    │   QUALITY   │  │
+│  │             │    │             │    │             │    │             │  │
+│  │ Scrape      │    │ Score lead  │    │ LeadGenJay  │    │ Score 0-100 │  │
+│  │ websites    │    │ against ICP │    │ 4-line      │    │ Rewrite if  │  │
+│  └─────────────┘    └─────────────┘    │ framework   │    │ needed      │  │
+│                                        └─────────────┘    └─────────────┘  │
+│                                                                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
+│  │ 9. SEND     │───►│ 10. TRACK   │───►│ 11. FOLLOW  │───►│ 12. LEARN   │  │
+│  │    EMAIL    │    │    RESULTS  │    │     UP      │    │             │  │
+│  │             │    │             │    │             │    │             │  │
+│  │ Zoho multi- │    │ MongoDB     │    │ Day 3 + 6   │    │ Feed back   │  │
+│  │ account     │    │ analytics   │    │ threading   │    │ to ICP      │  │
+│  └─────────────┘    └─────────────┘    └─────────────┘    │ selection   │  │
+│                                                           └─────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## The Autonomous Pipeline
+
+### Phase 1: ICP Selection (AI-Driven)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    AUTONOMOUS ICP SELECTION                      │
+│                    (Multi-Armed Bandit Algorithm)                │
+└─────────────────────────────────────────────────────────────────┘
+
+Input:
+├── Historical performance data (reply rates by ICP template)
+├── Run history (when each ICP was last used)
+├── Exploration rate setting (default 30%)
+└── Min days between same ICP (default 2)
+
+Algorithm:
+┌─────────────────────────────────────────────────────────────────┐
+│ For each ICP template:                                          │
+│   if never_tested:                                              │
+│     score = 50 + recency_bonus  (explore untested)              │
+│   elif sent < 20:                                               │
+│     score = 30 + reply_rate * 2 + recency_bonus  (learning)     │
+│   else:                                                         │
+│     score = reply_rate * 10 - overuse_penalty  (exploit)        │
+│                                                                 │
+│ if random() < exploration_rate:                                 │
+│   select from top 3 (weighted random)  # Explore               │
+│ else:                                                           │
+│   select highest score  # Exploit                               │
+└─────────────────────────────────────────────────────────────────┘
+
+Output:
+└── Selected ICP template (e.g., "startup_founders_funded")
+```
+
+### Phase 2: Campaign Creation
+
+```
+ICP Template: startup_founders_funded
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    CAMPAIGN GENERATED                            │
+├─────────────────────────────────────────────────────────────────┤
+│ Name: Campaign: Startup Founders Funded                         │
+│ ICP Template: startup_founders_funded                           │
+│                                                                 │
+│ Search Criteria (for RocketReach):                              │
+│   current_title: [CEO, Founder, Co-Founder, CTO]                │
+│   location: [United States, Canada, United Kingdom]             │
+│   keywords: [Technology, Software, SaaS, FinTech, HealthTech,   │
+│              recently raised, hiring engineers]                  │
+│                                                                 │
+│ Email Context:                                                  │
+│   pain_point: "need to ship fast but can't find reliable..."    │
+│   case_study: hr_tech_ai (43% faster processing)                │
+│   front_end_offer: "free 30-min architecture review"            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Phase 3: Lead Sourcing (RocketReach)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ROCKETREACH SEARCH                            │
+└─────────────────────────────────────────────────────────────────┘
+
+Search Criteria → RocketReach API
+    │
+    ├── Pagination tracked per criteria hash
+    │   └── Same ICP = same criteria = continues from last offset
+    │
+    ├── Global deduplication
+    │   └── Excludes 147+ already-contacted emails
+    │
+    └── Results: Fresh leads matching ICP criteria
+
+Example Flow:
+📍 Starting RocketReach search from offset 1
+🔍 Searching offset 1-16 (total available: 347,453)
+✓ Found: John Smith - john@startup.com
+✓ Found: Jane Doe - jane@techco.io
+💾 Saved search offset: 16 for next time
+```
+
+### Phase 4: Email Verification
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    VERIFICATION LAYERS                           │
+└─────────────────────────────────────────────────────────────────┘
+
+Layer 1: Quick Checks (instant)
+├── Syntax validation
+├── Disposable domain detection
+├── Role-based email detection (info@, support@)
+├── Problematic TLD check (.ru, .cn, .in)
+└── Large company domain block (google.com)
+
+Layer 2: MX Verification (~1 second)
+└── Domain can receive email
+
+Layer 3: SMTP Verification (~3 seconds)
+└── Mailbox actually exists
+
+Result: ~0% bounce rate (vs 40% without verification)
+```
+
+### Phase 5: Lead Enrichment
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    LEAD ENRICHMENT                               │
+└─────────────────────────────────────────────────────────────────┘
+
+For each lead:
+    1. Crawl company website
+    2. Extract personalization hooks:
+       - Recent news/launches
+       - Tech stack signals
+       - Hiring patterns
+       - Product features
+    3. Store in MongoDB for email generation
+
+Example:
+🔍 Enriching lead from https://startup.com
+✅ Enriched: 3 personalization hooks found
+   - "Just launched new API product"
+   - "Hiring 5 engineers"
+   - "Series A announced"
+```
+
+### Phase 6: ICP Classification
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ICP SCORING (TK Kader Framework)              │
+└─────────────────────────────────────────────────────────────────┘
+
+Scoring Components:
+├── Title Match (40%): Decision-maker title vs ICP definition
+├── Company Signals (30%): Tech company, right size, industry
+├── Enrichment Data (20%): Hiring, funding, growth signals
+└── Template Match (10%): Matches specific ICP template
+
+Output:
+├── is_icp: true/false
+├── icp_score: 0.0 - 1.0
+├── icp_template: "startup_founders_funded"
+└── icp_reasons: ["Decision-maker title", "Tech company"]
+
+Example:
+✅ ICP Match (score: 0.75): Decision-maker title: CEO, Tech company
+⚠️ Non-ICP Lead (score: 0.35): Not clearly a tech company
+```
+
+### Phase 7: Email Generation (LeadGenJay Framework)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    LEADGENJAY 4-LINE FRAMEWORK                   │
+└─────────────────────────────────────────────────────────────────┘
+
+LINE 1: PREVIEW TEXT (shows before opening)
+├── Must sound like a friend texting
+├── Must NOT reveal it's a pitch
+└── ✅ "hey tom, quick one."
+
+LINE 2: POKE THE BEAR (ask a QUESTION)
+├── About a universal pain they'll recognize
+└── ✅ "still doing deploys manually or did you automate that?"
+
+LINE 3: CASE STUDY (real, specific numbers)
+├── Must be TRUE (never fabricate)
+└── ✅ "helped an hr startup cut processing 43% in 8 weeks."
+
+LINE 4: SOFT CTA
+├── Low friction, conversational
+└── ✅ "thoughts?"
+
+Rules Enforced:
+├── Under 75 words total
+├── No em dashes (—) - #1 AI tell
+├── No corporate words (leverage, optimize, streamline)
+├── No "I noticed..." or "I saw you're..."
+└── Real case studies only (anti-hallucination protection)
+```
+
+### Phase 8: Quality Review
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    QUALITY GATE                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+Review Process:
+1. Score email against LeadGenJay guidelines (0-100)
+2. Check for violations:
+   - Word count > 75
+   - AI writing patterns
+   - Banned phrases
+   - Fabricated case studies
+3. Decision:
+   - Score >= 70: ✅ Pass
+   - Score < 70: 🔄 Rewrite with feedback (max 2 attempts)
+   - Still fails: ❌ Skip lead
+
+Example:
+📋 Email reviewer using: GROQ (llama-3.3-70b-versatile)
+⚠️ Email passed with warnings (score: 76)
+```
+
+### Phase 9: Email Sending
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    MULTI-ACCOUNT ZOHO SENDING                    │
+└─────────────────────────────────────────────────────────────────┘
+
+Account Rotation:
+├── 8 email accounts configured
+├── Round-robin rotation
+├── 25 emails/day/account limit
+├── 7-12 min cooldown between sends
+└── Automatic failover if account exhausted
+
+Email Threading:
+├── Initial: New Message-ID generated
+├── Followup 1: Same thread (In-Reply-To + References headers)
+└── Followup 2: NEW thread (fresh Message-ID, different angle)
+
+Sending Hours: 9:00 AM - 5:00 PM (US Eastern)
+```
+
+### Phase 10: Follow-up Sequence
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    FOLLOW-UP SEQUENCE                            │
+└─────────────────────────────────────────────────────────────────┘
+
+Day 0: Initial Email
+├── LeadGenJay 4-line framework
+└── Fresh Message-ID
+
+Day 3: Follow-up 1 (Same Thread)
+├── Reply to original (In-Reply-To header)
+├── Add value, don't just "bump"
+├── Under 50 words
+└── References original Message-ID
+
+Day 6: Follow-up 2 (NEW Thread)
+├── Completely different subject line
+├── Different angle/offer
+├── Fresh Message-ID
+└── Under 60 words
+
+Max 3 emails total, then stop.
+```
+
+### Phase 11: Analytics & Learning
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ICP PERFORMANCE TRACKING                      │
+└─────────────────────────────────────────────────────────────────┘
+
+Tracked Metrics (per ICP template):
+├── Emails sent
+├── Replies received
+├── Reply rate (%)
+├── Days since last used
+└── Total leads sourced
+
+Analytics Query:
+┌─────────────────────────────────────────────────────────────────┐
+│ ICP Template              │ Sent │ Replied │ Rate │ Last Run   │
+├───────────────────────────┼──────┼─────────┼──────┼────────────┤
+│ startup_founders_funded   │  45  │    3    │ 6.7% │ 2 days ago │
+│ ctos_at_capacity          │  38  │    2    │ 5.3% │ 3 days ago │
+│ ai_prototype_hell         │  22  │    1    │ 4.5% │ 5 days ago │
+│ legacy_modernization      │   0  │    0    │  -   │ never      │
+└─────────────────────────────────────────────────────────────────┘
+
+Learning Loop:
+High performers → More usage
+Low performers → Less usage (but still explored)
+Untested → High exploration priority
+```
+
+---
+
+## MongoDB Collections
+
+```
+Database: primeoutreachcron
+│
+├── scheduler_config        # Autonomous scheduler settings
+│   ├── config_type: "main"
+│   │   ├── mode: "autonomous"
+│   │   ├── scheduled_campaigns: [...]
+│   │   └── schedules: {...}
+│   └── config_type: "settings"
+│       ├── timezone: "America/New_York"
+│       ├── exploration_rate: 0.3
+│       └── min_days_between_same_icp: 2
+│
+├── icp_run_history         # ICP usage tracking
+│   ├── icp_template: "startup_founders_funded"
+│   ├── run_date: datetime
+│   ├── campaign_id: ObjectId
+│   ├── leads_sent: 15
+│   └── results: {...}
+│
+├── campaigns               # Campaign records
+│   ├── name: "Campaign: Startup Founders Funded"
+│   ├── target_criteria: {
+│   │   ├── current_title: [...]
+│   │   ├── location: [...]
+│   │   ├── keywords: [...]
+│   │   └── campaign_context: {
+│   │       ├── icp_template: "startup_founders_funded"
+│   │       ├── single_pain_point: "..."
+│   │       └── case_study: {...}
+│   │   }
+│   └── stats: {sent, replied, bounced}
+│
+├── leads                   # Lead records
+│   ├── email, name, company, title
+│   ├── is_icp: true/false
+│   ├── icp_template: "startup_founders_funded"
+│   ├── icp_score: 0.75
+│   └── enrichment: {...}
+│
+├── emails                  # Email records
+│   ├── lead_id, campaign_id
+│   ├── subject, body
+│   ├── status: "sent" | "replied" | "bounced"
+│   ├── is_icp: true/false
+│   ├── icp_template: "..."
+│   ├── message_id: "..." (for threading)
+│   └── followup_number: 0 | 1 | 2
+│
+├── email_reviews           # Quality review records
+├── search_offsets          # RocketReach pagination
+├── llm_usage               # Groq API usage tracking
+└── sending_stats           # Per-account send stats
+```
+
+---
+
+## ICP Templates
+
+Pre-defined ICP templates in `primestrides_context.py`:
+
+| Template | Target | Pain Point |
+|----------|--------|------------|
+| `startup_founders_funded` | CEO/Founder at funded startups | Need to ship fast, can't find talent |
+| `ctos_at_capacity` | CTO/VP Eng with stretched teams | Team can't hire fast enough |
+| `ai_prototype_hell` | Leaders with AI demos that don't work | Prototypes fail in production |
+| `legacy_modernization` | CTOs with legacy systems | Old systems holding them back |
+| `product_leaders_roadmap_slip` | VP Product with slipping roadmap | Can't hit deadlines |
+
+Each template includes:
+- Target titles for RocketReach
+- Industries/keywords
+- Pain point for email copy
+- Relevant case study
+- Front-end offer
+- Trigger signals
+
+---
+
+## Configuration
+
+### Environment Variables (.env)
+
+```env
+# MongoDB
+DATABASE_URL=mongodb://localhost:27017/primeoutreachcron
+
+# Groq LLM
+GROQ_API_KEY=your_key
+
+# RocketReach
+ROCKETREACH_API_KEY=your_key
+
+# Zoho (multiple accounts)
+ZOHO_ACCOUNTS=[{"email":"a@co.com","password":"xxx"},{"email":"b@co.com","password":"xxx"}]
+
+# Verification
+VERIFY_EMAILS=true
+VERIFY_SMTP=true
+
+# Sending
+TARGET_TIMEZONE=America/New_York
+SENDING_START_HOUR=9
+SENDING_END_HOUR=17
+```
+
+### Scheduler Config (MongoDB)
+
+The system stores config in MongoDB (`scheduler_config` collection), initialized with:
 
 ```json
 {
+  "mode": "autonomous",
   "scheduled_campaigns": [
     {
-      "description": "Target healthcare and medical technology companies that need software development",
-      "schedule_time": "09:00",
-      "days": ["monday", "wednesday", "friday"],
+      "name": "morning_campaign",
+      "autonomous": true,
+      "schedule_time": "09:30",
+      "days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
       "max_leads": 15,
       "enabled": true
     },
     {
-      "description": "Target fintech startups looking to build mobile apps or web platforms",
-      "schedule_time": "10:00",
-      "days": ["tuesday", "thursday"],
+      "name": "afternoon_campaign",
+      "autonomous": true,
+      "schedule_time": "14:30",
+      "days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
       "max_leads": 15,
       "enabled": true
     }
   ],
   "settings": {
-    "timezone": "Asia/Karachi",
-    "pause_weekends": true,
-    "max_emails_per_day_per_mailbox": 25
+    "timezone": "America/New_York",
+    "exploration_rate": 0.3,
+    "min_days_between_same_icp": 2
   }
 }
 ```
 
-**Campaign fields:**
-| Field | Description |
-|-------|-------------|
-| `description` | Plain English description - AI determines targeting, pain points, and email copy |
-| `schedule_time` | When to run (HH:MM, 24hr format) |
-| `days` | Which days to run (lowercase) |
-| `max_leads` | Maximum leads to fetch per run |
-| `enabled` | Set to `false` to disable without deleting |
+---
 
-### 3. Start the System
+## Running the System
 
-**Docker (Recommended):**
+### Fully Autonomous (Recommended)
+
 ```bash
-docker compose up -d
-
-# View logs
-docker compose logs -f
-
-# Stop
-docker compose down
+python auto_scheduler.py
 ```
 
-**Local Development:**
+Output:
+```
+📦 Loading scheduler config from MongoDB...
+   Mode: autonomous
+   Timezone: America/New_York
+   Campaigns: 2
+   🤖 Campaign #1: AUTONOMOUS (AI selects ICP)
+   🤖 Campaign #2: AUTONOMOUS (AI selects ICP)
+
+============================================================
+🤖 AUTONOMOUS CAMPAIGN - NO HUMAN INPUT REQUIRED
+============================================================
+
+🎯 AI Selected ICP: startup_founders_funded
+   Reason: High performer (6.7% reply rate)
+   Mode: exploitation
+
+Created campaign: Campaign: Startup Founders Funded
+Fetching leads... Excluding 147 already-contacted
+📍 Starting RocketReach search from offset 16
+✅ Fetched 15 leads
+
+[For each lead]
+✅ ICP Match (score: 0.75)
+📧 Generating email...
+✅ Email passed review (score: 82)
+📤 Sent to john@startup.com
+
+============================================================
+✅ ICP CAMPAIGN COMPLETE: 15 emails sent
+============================================================
+```
+
+### Legacy Mode (JSON Config)
+
 ```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python auto_scheduler.py
+python auto_scheduler.py --legacy
 ```
 
 ---
 
-## End-to-End Flow
+## Testing
 
-### 1. Startup
-```
-scheduler_config.json → AutoScheduler loads campaign templates
-                      → Checks for missed campaigns (runs them immediately)
-                      → Schedules future campaigns at their designated times
-```
+```bash
+# Test full autonomous pipeline (dry run)
+python -c "
+from campaign_manager import CampaignManager
+m = CampaignManager()
+results = m.run_autonomous_campaign(max_leads=2, dry_run=True)
+print(f'ICP: {results[\"icp_template\"]}')
+print(f'Sent: {results[\"sent\"]}')
+"
 
-### 2. Campaign Execution (at scheduled time or on catch-up)
-```
-Campaign Template (e.g., "Target SaaS founders building MVPs")
-    ↓
-EmailGenerator.determine_icp_and_criteria()
-    → Groq LLM analyzes description
-    → Returns: search criteria, pain point, case study, unique angle
-    ↓
-CampaignManager.create_campaign()
-    → Saves campaign to MongoDB (campaigns collection)
-    ↓
-RocketReachClient.search_leads()
-    → Uses KEYWORDS (not industry filters) for better results
-    → Pagination via SearchOffsetTracker
-    → Skips anyone already contacted (global deduplication)
-    ↓
-Email Verification Pipeline (for each lead):
-    quick_email_check()
-        → Syntax validation
-        → Disposable domain detection
-        → Role-based email detection (info@, support@, etc.)
-        → Problematic TLD check (.in, .ir, .ru, etc.)
-        → Large company domain block (google.com, microsoft.com)
-        → MX record verification
-    ↓
-    verify_email_smtp()
-        → SMTP mailbox verification
-        → Connects to MX server, checks if mailbox exists
-        → 100% bounce catch rate!
-    ↓
-    Saves verified leads to MongoDB (leads collection)
-    ↓
-For each verified lead:
-    EmailGenerator.generate_initial_email()
-        → Groq LLM writes personalized email (<75 words, 4-line structure)
-        → Includes learnings from past review failures
-        → Returns: subject + body
-    ↓
-    EmailReviewer.review_email()  [NEW - Quality Gate]
-        → Scores against LeadGenJay guidelines (0-100)
-        → Checks: word count, structure, CTA, banned phrases, AI tells
-        → Score >= 70? ✅ Pass
-        → Score < 70? 🔄 Rewrite with feedback (max 2 rewrites)
-        → Stores review in MongoDB for learning
-    ↓
-    ZohoSender.send_email()
-        → Picks next account (round-robin rotation)
-        → Sends via Zoho SMTP
-        → Saves to MongoDB (emails collection) with status + timestamps
-```
+# Check ICP analytics
+python -c "
+from icp_manager import ICPManager
+m = ICPManager()
+m.print_analytics_report()
+"
 
-### 3. Follow-up Loop (every 6 hours)
-```
-CampaignManager.send_followup_emails()
-    ↓
-For each campaign:
-    Find emails where:
-        - status = "sent" (not replied/bounced)
-        - followup_count < 2
-        - last_sent_at > 3 days ago (followup 1) or > 6 days ago (followup 2)
-    ↓
-    EmailGenerator.generate_followup_email()
-        → Followup 1: Same thread (Re: subject), adds value
-        → Followup 2: NEW thread, different angle, lower friction
-    ↓
-    ZohoSender.send_email() or send_reply()
-    → Updates email record in MongoDB
-```
+# Check scheduler config
+python tests/test_scheduler_config.py
 
-### 4. Reply Detection (every 2 hours, requires paid Zoho IMAP)
-```
-ReplyDetector.check_replies()
-    → IMAP connects to each Zoho account
-    → Searches for replies to sent emails
-    → Marks email status = "replied" in MongoDB
-    → Stops further follow-ups for that lead
-```
+# Test email generation
+python tests/test_email_generation.py
 
-### 5. Data Model
+# Full pipeline test
+python tests/test_full_pipeline.py
 ```
-MongoDB: primeoutreachcron
-├── campaigns       {name, status, target_criteria, campaign_context, stats}
-├── leads           {email, name, company, title, campaign_id, contacted, verified_at}
-├── emails          {lead_id, campaign_id, subject, body, status, followup_count, sent_at}
-├── email_reviews   {email_id, score, status, issues, suggestions, rule_violations, created_at}
-├── search_offsets  {search_key, offset, total_results, last_used}
-├── llm_usage       {date, model, count, updated_at}
-└── sending_stats   {account_email, date, emails_sent, last_send_time}
-```
-
-### 6. Sending Limits
-- Multiple Zoho accounts rotating
-- 25 emails/day/account
-- 7-12 min random delay between emails
-- Weekends paused
 
 ---
 
@@ -235,248 +663,96 @@ The system uses Groq as the primary LLM provider with automatic fallback:
 
 ---
 
-## Email Verification Pipeline
+## ICP Tracking (TK Kader Framework)
 
-Multi-layer verification reduces bounce rate from ~40% to ~0%:
+The system implements TK Kader's Ideal Customer Profile framework for data-driven targeting:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    VERIFICATION LAYERS                           │
-└─────────────────────────────────────────────────────────────────┘
+### Core Principles
 
-Layer 1: Quick Checks (instant)
-├── ✓ Syntax validation (valid email format)
-├── ✓ Disposable domain detection (tempmail.com, etc.)
-├── ✓ Role-based email detection (info@, support@, sales@)
-├── ✓ Problematic TLD check (.in, .ir, .ru, .cn, etc.)
-└── ✓ Large company domain block (google.com, microsoft.com)
+1. **10x Better** - Target prospects where we solve urgent problems better than alternatives
+2. **Data-Backed** - ICP decisions informed by actual performance data, not wishlists
+3. **Mobilize & Track** - Track ICP vs non-ICP throughout go-to-market, refine quarterly
 
-Layer 2: DNS Verification (~1 second)
-└── ✓ MX record verification (domain can receive email)
-
-Layer 3: SMTP Verification (~3 seconds)
-└── ✓ Mailbox existence check (connects to server, verifies mailbox)
-```
-
-### Configuration
-```env
-VERIFY_EMAILS=true      # Enable/disable verification
-VERIFY_SMTP=true        # Enable/disable SMTP verification (most thorough)
-```
-
-### Visual Flow
-```
-┌─────────────────┐     ┌──────────────┐     ┌─────────────┐
-│ scheduler_config│────▶│ AI generates │────▶│ RocketReach │
-│    (ICPs)       │     │   criteria   │     │ fetches leads│
-└─────────────────┘     └──────────────┘     └──────┬──────┘
-                                                    │
-                        ┌───────────────────────────┘
-                        ▼
-┌─────────────────┐     ┌──────────────┐     ┌─────────────┐
-│ Email           │     │  Verified    │     │             │
-│ Verification    │────▶│  Leads       │────▶│ AI writes   │
-│ (MX + SMTP)     │     │  Only        │     │ emails      │
-└─────────────────┘     └──────────────┘     └──────┬──────┘
-                                                    │
-                        ┌───────────────────────────┘
-                        ▼
-┌─────────────────┐     ┌──────────────┐     ┌─────────────┐
-│    MongoDB      │◀───▶│ Zoho sends   │────▶│  Follow-ups │
-│ (all data +     │     │ (rotation)   │     │  (Day 3 & 6)│
-│  LLM usage)     │     └──────────────┘     └─────────────┘
-└─────────────────┘
-```
-
----
-
-## System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           COLD EMAIL AUTOMATION SYSTEM                       │
-│                               For PrimeStrides                               │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-                              ┌─────────────────┐
-                              │     main.py     │
-                              │   Entry Point   │
-                              └────────┬────────┘
-                                       │
-           ┌───────────────────────────┼───────────────────────────┐
-           │                           │                           │
-           ▼                           ▼                           ▼
-┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐
-│  create "desc"   │      │   run <id>       │      │    scheduler     │
-│  Creates new     │      │   followups      │      │  Auto-scheduler  │
-│  campaign        │      │   stats          │      │  for hands-off   │
-└────────┬─────────┘      └────────┬─────────┘      └────────┬─────────┘
-         │                         │                         │
-         └─────────────────────────┼─────────────────────────┘
-                                   ▼
-                       ┌───────────────────────┐
-                       │   CampaignManager     │
-                       │ (campaign_manager.py) │
-                       │                       │
-                       │  The ORCHESTRATOR     │
-                       │  Controls everything  │
-                       └───────────┬───────────┘
-                                   │
-      ┌────────────────────────────┼────────────────────────────┐
-      │                            │                            │
-      ▼                            ▼                            ▼
-┌───────────────┐        ┌────────────────┐          ┌────────────────┐
-│  STEP 1       │        │  STEP 2        │          │  STEP 3        │
-│  Fetch Leads  │───────►│  Generate      │─────────►│  Send Email    │
-│  + Verify     │        │  Emails        │          │  via Zoho      │
-└───────────────┘        └────────────────┘          └────────────────┘
-       │                         │                          │
-       ▼                         ▼                          ▼
-┌───────────────┐        ┌────────────────┐          ┌────────────────┐
-│ RocketReach   │        │ Groq LLM       │          │ Multi-account  │
-│ + MX + SMTP   │        │ + Fallback     │          │ rotation       │
-│ verification  │        │ chain          │          │                │
-└───────────────┘        └────────────────┘          └────────────────┘
-```
-
----
-
-## Expert Email Strategy (Implemented)
-
-Based on Eric Nowoslawski's 90-page doc and LeadGenJay's masterclass:
-
-| Rule | Implementation |
-|------|----------------|
-| Subject: 2-4 words, colleague-like | NO "Quick question", YES "quick q", "random thought" |
-| First line = curiosity builder | NO "I noticed...", YES "random thought. {Company}..." |
-| Under 75 words | Enforced in AI prompts + validation |
-| 4-line structure | Hook → Pain → Case study → Soft CTA |
-| ONE pain point only | AI picks single pain from campaign context |
-| Specific case studies | Real numbers: "2.7x throughput in 10 weeks" |
-| Max 3 emails total | Initial + 2 follow-ups, then stop |
-| Email 2: Same thread | Adds value, not "just following up" |
-| Email 3: NEW thread | Different subject, different angle |
-| Soft CTA only | "thoughts?" "make sense?" not "schedule a call" |
-| Sound human | NO em dashes (—), NO AI words (leverage, robust, etc.) |
-
----
-
-## Self-Improving Email Review System
-
-The system automatically learns from past failures and improves:
+### How It Works
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    SELF-IMPROVEMENT LOOP                         │
-│                                                                  │
-│  1️⃣ Generate Email                                              │
-│         ↓                                                        │
-│  2️⃣ AI Reviewer scores against LeadGenJay guidelines            │
-│         ↓                                                        │
-│  3️⃣ Score >= 70? ✅ Send  |  Score < 70? 🔄 Rewrite             │
-│         ↓                                                        │
-│  4️⃣ Store ALL reviews in MongoDB (passed AND failed)            │
-│         ↓                                                        │
-│  5️⃣ Analyze past failures → Generate improvement prompt         │
-│         ↓                                                        │
-│  6️⃣ Inject learnings into next email generation                 │
-│         ↓                                                        │
-│  7️⃣ Better emails next time! 🎯                                 │
-│                                                                  │
+│                    ICP TRACKING FLOW                             │
 └─────────────────────────────────────────────────────────────────┘
+
+1. Lead Classification (before sending)
+   └── classify_lead_icp() scores each lead:
+       ├── Title match (40%): Decision-maker titles (CTO, Founder, VP Eng)
+       ├── Company signals (30%): Funded, growing, tech industry
+       ├── Enrichment (20%): Hiring engineers, matching tech stack
+       └── Template match (10%): Aligns with known ICP templates
+
+2. Tracking (when sending)
+   └── Email records include:
+       ├── is_icp: True/False
+       ├── icp_template: Which template matched
+       └── icp_score: Confidence 0.0-1.0
+
+3. Analytics (ongoing)
+   └── get_icp_analytics() returns:
+       ├── ICP vs Non-ICP reply rates
+       ├── Performance by template
+       └── Recommendations for refinement
+
+4. Refinement (quarterly)
+   └── AI generates new ICPs based on:
+       ├── What's working (high reply rate templates)
+       ├── What's not (underperforming templates)
+       └── New opportunities from case studies
 ```
 
-### Quality Gate Checks
-- ✅ Word count (50-75 words ideal)
-- ✅ 4-line structure enforced
-- ✅ Company name mentioned
-- ✅ Soft CTA present
-- ✅ No banned phrases ("I noticed", "I hope this finds you")
-- ✅ No AI punctuation (em dashes, fancy ellipsis)
-- ✅ No AI vocabulary (delve, leverage, robust, seamless)
-- ✅ Subject line format (2-4 casual words)
-
-### Learnings Storage
-```
-MongoDB: email_reviews
-├── score (0-100)
-├── status (pass/warning/fail)
-├── issues (what went wrong)
-├── suggestions (how to improve)
-├── rule_violations (hard fails)
-└── created_at (for time-based analysis)
-```
-
----
-
-## Quick Start
-
-### Docker (Recommended)
+### CLI Commands
 
 ```bash
-# Clone and configure
-cp .env.example .env
-# Edit .env with your credentials
+# View ICP performance analytics
+python icp_manager.py analytics
 
-# Start
-docker compose up -d
+# Generate a new ICP template from campaign goal
+python icp_manager.py generate --goal "Series B fintech startups building payment infrastructure"
 
-# View logs
-docker compose logs -f
-
-# Stop
-docker compose down
+# Generate campaign config from existing ICP template
+python icp_manager.py campaign --icp startup_founders_funded
 ```
 
-### Local Development
+### Example Analytics Output
 
-```bash
-# Install dependencies
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+```
+📊 ICP PERFORMANCE ANALYTICS (TK Kader Framework)
+============================================================
 
-# Configure
-cp .env.example .env
-# Edit .env with your credentials
+📧 Total Emails: 500 sent, 25 replied
 
-# Run scheduler
-python auto_scheduler.py
+🎯 ICP vs Non-ICP Performance:
+----------------------------------------
+  ICP Leads:
+    Sent: 300, Replied: 20
+    Reply Rate: 6.67%
+  Non-ICP Leads:
+    Sent: 200, Replied: 5
+    Reply Rate: 2.5%
+
+💡 Key Insights:
+  • ICP leads convert 167% better than non-ICP leads
+
+🎬 Recommendations:
+  ✅ Double down on 'startup_founders_funded' - 8.5% reply rate
+  🔄 Review these templates: legacy_modernization - zero replies
 ```
 
----
+### Existing ICP Templates
 
-## Configuration
-
-### Environment Variables (.env)
-
-```env
-# Database
-DATABASE_URL=mongodb://admin:password@192.168.1.9:27017/primeoutreachcron?authSource=admin
-
-# LLM Provider (groq or openai)
-LLM_PROVIDER=groq
-GROQ_API_KEY=gsk_...
-GROQ_MODEL=llama-3.3-70b-versatile
-
-# OpenAI (fallback)
-OPENAI_API_KEY=sk-...
-
-# RocketReach
-ROCKETREACH_API_KEY=...
-
-# Email Verification
-VERIFY_EMAILS=true
-VERIFY_SMTP=true
-
-# Multiple Zoho accounts (comma-separated, same order)
-ZOHO_EMAILS=hello@domain.com,info@domain.com,ali@domain.com
-ZOHO_PASSWORDS=pass1,pass2,pass3
-ZOHO_SENDER_NAMES=Ahmed,Abdul,Ali
-
-EMAIL_ROTATION_STRATEGY=round-robin
-EMAILS_PER_ACCOUNT=5
-```
+| Template | Target | Pain Point |
+|----------|--------|------------|
+| `startup_founders_funded` | Funded startup founders | Ship faster with limited team |
+| `ctos_at_capacity` | CTOs at growing companies | Team at capacity, roadmap slipping |
+| `ai_prototype_hell` | Founders with AI ideas | Stuck between prototype and production |
+| `legacy_modernization` | Enterprise VPs | Legacy system migration paralysis |
+| `product_leaders_roadmap_slip` | Product leaders | Roadmap slip, can't hire fast enough |
 
 ---
 
@@ -490,6 +766,104 @@ The system guarantees you **never email the same person twice**:
 | Email verification | Multi-layer verification (syntax, MX, SMTP) |
 | Campaign level | Double-checks before each send |
 | Database | Unique index on email field |
+
+---
+
+## Performance Optimizations
+
+| Metric | Before | After |
+|--------|--------|-------|
+| **Leads per search** | 0-5 results | 17K-305K results |
+| **Bounce rate** | ~40% | ~0% (verified) |
+| **LLM capacity** | 1K req/day | 28,900 req/day |
+| **LLM persistence** | Lost on restart | Stored in MongoDB |
+| **Email pass rate** | Variable | 100% first attempt |
+| **API calls per email** | 4-6 | 2 (optimized prompts) |
+| **Human input required** | Every campaign | **ZERO** |
+
+### Key Improvements Made:
+1. **Autonomous ICP selection**: AI picks best ICP based on historical performance
+2. **MongoDB config storage**: No more JSON files, dynamic updates
+3. **Multi-armed bandit**: Balances exploration (testing new ICPs) vs exploitation (using best performers)
+4. **Search criteria**: Use keywords instead of narrow industry filters
+5. **Pagination**: SearchOffsetTracker for iterating through large result sets
+6. **Email verification**: Multi-layer (syntax → MX → SMTP) catches 100% of bounces
+7. **LLM fallback**: Automatic model rotation when limits hit
+8. **Usage persistence**: MongoDB-backed usage tracking survives restarts
+9. **Self-improving prompts**: Learns from failures, injects fixes into generation
+10. **Human-sounding output**: Strips AI patterns (em dashes, corporate words)
+11. **Quality gate**: AI reviewer ensures emails meet guidelines before sending
+
+---
+
+## Project Structure
+
+```
+coldemails/
+├── auto_scheduler.py            # Main entry - fully autonomous scheduler (MongoDB config)
+├── campaign_manager.py          # Campaign orchestration + autonomous pipeline
+├── icp_manager.py               # ICP selection, analytics, TK Kader framework
+├── email_generator.py           # AI email generation (Groq + fallback chain)
+├── email_reviewer.py            # Self-improving AI review system
+├── email_verifier.py            # Multi-layer email verification
+├── primestrides_context.py      # Case studies, ICP templates, company context
+├── rocketreach_client.py        # Lead discovery + deduplication
+├── zoho_sender.py               # Multi-account email sending
+├── reply_detector.py            # IMAP reply checking
+├── database.py                  # MongoDB models + SchedulerConfig + SearchOffsetTracker
+├── config.py                    # Environment config
+├── main.py                      # CLI interface
+├── check_groq_usage.py          # Check LLM usage stats
+├── scheduler_config.json        # Legacy: JSON config (use --legacy flag)
+├── scheduler_config.example.json # Template for legacy mode
+├── utils/                       # Utility modules
+│   ├── __init__.py
+│   └── logging_utils.py         # Logging + retry decorators
+├── data/                        # Author knowledge base
+│   ├── author_knowledge.json
+│   └── author_knowledge.md
+├── docs/                        # Cold email strategy documentation
+│   ├── cold-email-strategies-lead-gen-jay.txt
+│   ├── secret-90-page-cold-email-strategy.txt
+│   └── ...
+├── tests/                       # Test files
+│   ├── test_full_pipeline.py
+│   ├── test_email_generation.py
+│   ├── test_reviewer.py
+│   └── ...
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## Troubleshooting
+
+### IMAP Warnings
+```
+⚠️ IMAP not enabled
+```
+This is expected on Zoho free plan. Reply detection requires paid Zoho with IMAP enabled.
+
+### MongoDB Connection
+Ensure `extra_hosts: host.docker.internal:host-gateway` is in docker-compose.yml for Docker to reach host MongoDB.
+
+### Zoho Auth Errors
+Use App-Specific Passwords from Zoho Account → Security → App Passwords.
+
+### RocketReach Limits
+Check credits at rocketreach.co. System deduplicates leads to avoid wasting credits.
+
+### UnboundLocalError: emails_collection
+This was fixed. The system now uses `ec_bounce_check` for local imports to avoid Python scoping conflicts.
+
+### Legacy Mode
+If you prefer JSON config over MongoDB:
+```bash
+python auto_scheduler.py --legacy
+```
 
 ---
 
@@ -522,143 +896,13 @@ python main.py list
 
 # Check Groq usage
 python check_groq_usage.py
+
+# Check ICP analytics
+python -c "from icp_manager import ICPManager; ICPManager().print_analytics_report()"
 ```
 
 ---
 
-## Project Structure
+## License
 
-```
-coldemails/
-├── auto_scheduler.py            # Main entry - fully automated scheduler
-├── campaign_manager.py          # Campaign orchestration + quality gate
-├── email_generator.py           # AI email generation (Groq + fallback chain)
-├── email_reviewer.py            # Self-improving AI review system
-├── primestrides_context.py      # Case studies, ICP templates
-├── rocketreach_client.py        # Lead discovery + email verification
-├── zoho_sender.py               # Multi-account email sending
-├── reply_detector.py            # IMAP reply checking
-├── database.py                  # MongoDB models + SearchOffsetTracker
-├── config.py                    # Environment config
-├── main.py                      # CLI interface
-├── check_groq_usage.py          # Check LLM usage stats
-├── scheduler_config.json        # Your campaign schedule (create from example)
-├── scheduler_config.example.json # Template for campaign schedule
-├── utils/                       # Utility modules
-│   ├── __init__.py
-│   └── logging_utils.py         # Logging + retry decorators
-├── Dockerfile                   # Container build
-├── docker-compose.yml           # Portainer-compatible deployment
-├── .env                         # Credentials (create from example)
-├── .env.example                 # Template for credentials
-├── docs/                        # Cold email strategy documentation
-│   ├── cold-email-strategies-lead-gen-jay.txt
-│   ├── secret-90-page-cold-email-strategy.txt
-│   └── ...
-└── tests/                       # Test files
-    ├── test_full_pipeline.py    # End-to-end pipeline test
-    ├── test_reviewer.py         # Review system tests
-    ├── test_human_writing.py    # AI detection tests
-    ├── check_learning.py        # Verify self-improvement
-    └── ...
-```
-
----
-
-## Troubleshooting
-
-### IMAP Warnings
-```
-⚠️ IMAP not enabled
-```
-This is expected on Zoho free plan. Reply detection requires paid Zoho with IMAP enabled.
-
-### MongoDB Connection
-Ensure `extra_hosts: host.docker.internal:host-gateway` is in docker-compose.yml for Docker to reach host MongoDB.
-
-### Zoho Auth Errors
-Use App-Specific Passwords from Zoho Account → Security → App Passwords.
-
-### RocketReach Limits
-Check credits at rocketreach.co. System deduplicates leads to avoid wasting credits.
-
----
-
-## Writing Campaign Descriptions
-
-The `description` field in `scheduler_config.json` is analyzed by AI to determine:
-- **Target titles**: CEO, CTO, Founder, VP Engineering, etc.
-- **Industries**: SaaS, FinTech, HealthTech, etc.
-- **Pain points**: What problem they likely have
-- **Email copy**: Personalized based on their situation
-
-**Good descriptions:**
-```
-"Target fintech startups looking to build mobile apps or web platforms"
-"Target healthcare companies that need HIPAA-compliant software development"
-"Target SaaS founders who recently raised seed funding and need to ship fast"
-"Target CTOs at growing startups whose engineering teams are stretched thin"
-```
-
-**Bad descriptions:**
-```
-"Send emails to tech companies"  # Too vague
-"CEOs"  # No context about their needs
-```
-
-The more specific your description, the better the targeting and email personalization.
-
----
-
-## Performance Optimizations
-
-| Metric | Before | After |
-|--------|--------|-------|
-| **Leads per search** | 0-5 results | 17K-305K results |
-| **Bounce rate** | ~40% | ~0% (verified) |
-| **LLM capacity** | 1K req/day | 28,900 req/day |
-| **LLM persistence** | Lost on restart | Stored in MongoDB |
-| **Email pass rate** | Variable | 100% first attempt |
-| **API calls per email** | 4-6 | 2 (optimized prompts) |
-
-### Key Improvements Made:
-1. **Search criteria**: Use keywords instead of narrow industry filters
-2. **Pagination**: SearchOffsetTracker for iterating through large result sets
-3. **Email verification**: Multi-layer (syntax → MX → SMTP) catches 100% of bounces
-4. **LLM fallback**: Automatic model rotation when limits hit
-5. **Usage persistence**: MongoDB-backed usage tracking survives restarts
-6. **Self-improving prompts**: Learns from failures, injects fixes into generation
-7. **Human-sounding output**: Strips AI patterns (em dashes, corporate words)
-8. **Quality gate**: AI reviewer ensures emails meet guidelines before sending
-
----
-
-## Testing
-
-Run the test suite to verify the system:
-
-```bash
-# Full pipeline test (generate → review → rewrite → send)
-python tests/test_full_pipeline.py
-
-# Test reviewer system
-python tests/test_reviewer.py
-
-# Check self-improvement is learning
-python tests/check_learning.py
-
-# Test human-writing detection
-python tests/test_human_writing.py
-```
-
-### Expected Output
-```
-📊 PIPELINE TEST SUMMARY
-   Total emails tested: 3
-   ✅ Passed: 3
-   Pass rate: 100.0%
-   
-   ✅ Sarah @ FinanceHub: passed (score: 83, attempts: 1)
-   ✅ Mike @ HealthFirst: passed (score: 78, attempts: 1)
-   ✅ Lisa @ CloudScale: passed (score: 73, attempts: 1)
-```
+Private - PrimeStrides Internal Use Only

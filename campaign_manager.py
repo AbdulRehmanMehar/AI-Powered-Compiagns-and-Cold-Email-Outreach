@@ -4,15 +4,29 @@ import time
 import random
 import logging
 
-from database import Lead, Email, Campaign
+from database import Lead, Email, Campaign, DoNotContact, emails_collection
 from rocketreach_client import RocketReachClient
 from email_generator import EmailGenerator
 from email_reviewer import EmailReviewer, ReviewStatus, format_review_report
+from email_verifier import EmailVerifier, VerificationStatus
 from zoho_sender import ZohoEmailSender, text_to_html
+from lead_enricher import enrich_lead_sync, get_enrichment_for_email
 import config
 
 # Module logger
 logger = logging.getLogger(__name__)
+
+# Global email verifier instance (reused for efficiency)
+_email_verifier = None
+
+def get_email_verifier() -> EmailVerifier:
+    """Get or create the email verifier instance"""
+    global _email_verifier
+    if _email_verifier is None:
+        # skip_smtp_verify=False means we DO full SMTP verification
+        _email_verifier = EmailVerifier(smtp_timeout=10, skip_smtp_verify=False)
+        print("🔍 Email verifier initialized (MX + SMTP checks enabled)")
+    return _email_verifier
 
 
 def get_random_delay() -> int:
@@ -61,6 +75,254 @@ class CampaignManager:
         
         print(f"Created campaign: {name} (ID: {campaign_id})")
         return campaign_id
+    
+    def create_campaign_from_icp(self, 
+                                  icp_template: str,
+                                  custom_context: Dict[str, Any] = None) -> str:
+        """
+        Create a campaign directly from an ICP template.
+        
+        This is the recommended way to create campaigns as it:
+        1. Uses pre-defined ICP criteria optimized for RocketReach
+        2. Ensures leads fetched are likely to be ICP matches
+        3. Tracks which ICP template the campaign uses
+        
+        Args:
+            icp_template: Name of ICP template (e.g., 'startup_founders_funded')
+            custom_context: Optional overrides for campaign context
+        
+        Returns:
+            Campaign ID
+        """
+        from icp_manager import ICPManager
+        
+        manager = ICPManager()
+        campaign_config = manager.generate_campaign_from_icp(icp_template, custom_context)
+        
+        if "error" in campaign_config:
+            raise ValueError(campaign_config["error"])
+        
+        campaign_id = self.create_campaign(
+            name=campaign_config["name"],
+            description=campaign_config["description"],
+            target_criteria=campaign_config["target_criteria"],
+            campaign_context=campaign_config["campaign_context"]
+        )
+        
+        print(f"🎯 Campaign created from ICP template: {icp_template}")
+        return campaign_id
+    
+    def run_icp_campaign(self,
+                         icp_template: str,
+                         max_leads: int = 15,
+                         dry_run: bool = False,
+                         custom_context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        End-to-end campaign execution from an ICP template.
+        
+        This is the simplest way to run a campaign:
+        1. Creates campaign from ICP template
+        2. Fetches leads matching ICP criteria from RocketReach
+        3. Generates and sends personalized emails
+        4. Tracks ICP status on every lead and email
+        
+        Args:
+            icp_template: Name of ICP template
+            max_leads: Maximum leads to fetch
+            dry_run: If True, generate but don't send
+            custom_context: Optional campaign context overrides
+        
+        Returns:
+            Results summary
+        """
+        from icp_manager import ICPManager
+        from primestrides_context import ICP_TEMPLATES
+        
+        # Validate ICP template exists
+        if icp_template not in ICP_TEMPLATES:
+            available = list(ICP_TEMPLATES.keys())
+            return {"error": f"Unknown ICP template: {icp_template}", "available": available}
+        
+        print(f"\n{'='*60}")
+        print(f"🎯 RUNNING ICP CAMPAIGN: {icp_template}")
+        print(f"{'='*60}")
+        
+        # Step 1: Create campaign
+        campaign_id = self.create_campaign_from_icp(icp_template, custom_context)
+        
+        # Step 2: Fetch leads (using ICP-optimized search criteria)
+        leads = self.fetch_leads_for_campaign(campaign_id, max_leads)
+        
+        if not leads:
+            return {
+                "campaign_id": campaign_id,
+                "icp_template": icp_template,
+                "leads_fetched": 0,
+                "message": "No leads found matching ICP criteria"
+            }
+        
+        # Step 3: Send emails (with ICP tracking)
+        results = self.send_initial_emails(campaign_id, leads, dry_run=dry_run)
+        
+        # Add ICP context to results
+        results["campaign_id"] = campaign_id
+        results["icp_template"] = icp_template
+        results["leads_fetched"] = len(leads)
+        
+        print(f"\n{'='*60}")
+        print(f"✅ ICP CAMPAIGN COMPLETE: {results.get('sent', 0)} emails sent")
+        print(f"{'='*60}\n")
+        
+        return results
+    
+    def run_autonomous_campaign(self,
+                                 max_leads: int = 15,
+                                 dry_run: bool = False) -> Dict[str, Any]:
+        """
+        FULLY AUTONOMOUS CAMPAIGN EXECUTION
+        
+        This method requires ZERO human input. It:
+        1. Analyzes historical ICP performance
+        2. Selects the best ICP template automatically
+        3. Fetches leads matching that ICP
+        4. Generates and sends personalized emails
+        5. Tracks everything for future optimization
+        
+        The system learns over time:
+        - High-performing ICPs get more usage
+        - Underperforming ICPs get less
+        - Untested ICPs get explored
+        
+        Args:
+            max_leads: Maximum leads to fetch
+            dry_run: If True, generate but don't send
+        
+        Returns:
+            Results summary including which ICP was selected and why
+        """
+        from database import SchedulerConfig
+        
+        print(f"\n{'='*60}")
+        print(f"🤖 AUTONOMOUS CAMPAIGN - NO HUMAN INPUT REQUIRED")
+        print(f"{'='*60}")
+        
+        # Step 1: AI selects the best ICP based on performance data (MongoDB)
+        selection = SchedulerConfig.select_icp_for_autonomous_run()
+        selected_icp = selection["selected_icp"]
+        selection_reason = selection["selection_reason"]
+        selection_mode = selection["selection_mode"]
+        
+        print(f"\n🎯 AI Selected ICP: {selected_icp}")
+        print(f"   Reason: {selection_reason}")
+        print(f"   Mode: {selection_mode} (exploration vs exploitation)")
+        print(f"   Today's runs: {selection.get('icps_excluded_today', [])}\n")
+        
+        # Step 2: Run the campaign with selected ICP
+        results = self.run_icp_campaign(
+            icp_template=selected_icp,
+            max_leads=max_leads,
+            dry_run=dry_run
+        )
+        
+        # Step 3: Record the run in MongoDB (for future autonomous decisions)
+        if not dry_run:
+            SchedulerConfig.record_icp_run(
+                icp_template=selected_icp,
+                campaign_id=results.get("campaign_id"),
+                leads_sent=results.get("sent", 0),
+                results={
+                    "leads_fetched": results.get("leads_fetched", 0),
+                    "sent": results.get("sent", 0),
+                    "errors": results.get("send_errors", 0),
+                    "selection_mode": selection_mode
+                }
+            )
+        
+        # Add autonomous selection metadata
+        results["autonomous"] = True
+        results["icp_template"] = selected_icp
+        results["selection_reason"] = selection_reason
+        results["selection_mode"] = selection_mode
+        
+        return results
+    
+    def run_autonomous_daily_plan(self,
+                                   num_campaigns: int = 3,
+                                   leads_per_campaign: int = 15,
+                                   dry_run: bool = False) -> Dict[str, Any]:
+        """
+        FULLY AUTONOMOUS DAILY CAMPAIGN PLAN
+        
+        Executes multiple campaigns in one day with intelligent ICP rotation:
+        1. Analyzes all ICP performance
+        2. Creates a balanced plan (exploit winners + explore new)
+        3. Executes campaigns with delays between them
+        4. Reports aggregate results
+        
+        This is the main entry point for fully automated daily operations.
+        
+        Args:
+            num_campaigns: How many campaigns to run today
+            leads_per_campaign: Leads per campaign
+            dry_run: If True, generate but don't send
+        
+        Returns:
+            Aggregate results for all campaigns
+        """
+        from icp_manager import ICPManager
+        import time
+        
+        print(f"\n{'='*60}")
+        print(f"🤖 AUTONOMOUS DAILY PLAN - {num_campaigns} CAMPAIGNS")
+        print(f"{'='*60}")
+        
+        icp_manager = ICPManager()
+        plan = icp_manager.get_autonomous_campaign_plan(num_campaigns)
+        
+        print(f"\n📋 Today's Campaign Plan:")
+        for i, campaign in enumerate(plan):
+            print(f"   {i+1}. {campaign.get('campaign_context', {}).get('icp_template', 'unknown')}")
+            print(f"      Reason: {campaign.get('selection_reason', 'N/A')}")
+        print()
+        
+        # Execute each campaign
+        all_results = {
+            "total_campaigns": num_campaigns,
+            "total_leads": 0,
+            "total_sent": 0,
+            "campaigns": []
+        }
+        
+        for i, campaign_config in enumerate(plan):
+            icp_template = campaign_config.get("campaign_context", {}).get("icp_template")
+            
+            print(f"\n--- Campaign {i+1}/{num_campaigns}: {icp_template} ---")
+            
+            results = self.run_icp_campaign(
+                icp_template=icp_template,
+                max_leads=leads_per_campaign,
+                dry_run=dry_run
+            )
+            
+            results["selection_reason"] = campaign_config.get("selection_reason")
+            all_results["campaigns"].append(results)
+            all_results["total_leads"] += results.get("leads_fetched", 0)
+            all_results["total_sent"] += results.get("sent", 0)
+            
+            # Delay between campaigns (if not last and not dry run)
+            if i < num_campaigns - 1 and not dry_run:
+                delay_mins = 30  # 30 min between campaigns
+                print(f"\n⏳ Waiting {delay_mins} minutes before next campaign...")
+                time.sleep(delay_mins * 60)
+        
+        print(f"\n{'='*60}")
+        print(f"✅ DAILY PLAN COMPLETE")
+        print(f"   Campaigns: {num_campaigns}")
+        print(f"   Total Leads: {all_results['total_leads']}")
+        print(f"   Total Sent: {all_results['total_sent']}")
+        print(f"{'='*60}\n")
+        
+        return all_results
     
     def fetch_leads_for_campaign(self,
                                   campaign_id: str,
@@ -216,11 +478,99 @@ class CampaignManager:
                     results["skipped"] += 1
                     continue
                 
+                # DO-NOT-CONTACT CHECK: Skip emails on the blocklist (unsubscribes, complaints, hard bounces)
+                if DoNotContact.is_blocked(lead_email):
+                    reason = DoNotContact.get_reason(lead_email)
+                    print(f"🚫 Skipping {lead_email} - on do-not-contact list (reason: {reason})")
+                    results["skipped"] += 1
+                    results["skipped_do_not_contact"] = results.get("skipped_do_not_contact", 0) + 1
+                    continue
+                
+                # EMAIL VERIFICATION CHECK: Skip leads with known-invalid emails from RocketReach
+                raw_data = lead.get("raw_data", {})
+                rr_emails = raw_data.get("emails", [])
+                email_is_invalid = False
+                for e in rr_emails:
+                    if isinstance(e, dict) and e.get("email") == lead_email:
+                        smtp_valid = e.get("smtp_valid", "").lower()
+                        grade = e.get("grade", "")
+                        if smtp_valid == "invalid" or grade == "F":
+                            print(f"⛔ Skipping {lead_email} - RocketReach marked INVALID (smtp_valid={smtp_valid}, grade={grade})")
+                            email_is_invalid = True
+                            results["skipped"] += 1
+                            results["skipped_invalid"] = results.get("skipped_invalid", 0) + 1
+                            break
+                if email_is_invalid:
+                    continue
+                
+                # BOUNCE CHECK: Skip leads that have bounced before (from any campaign)
+                from database import emails_collection as ec_bounce_check
+                from bson import ObjectId
+                bounced_email = ec_bounce_check.find_one({
+                    'lead_id': ObjectId(lead_id),
+                    'status': 'bounced'
+                })
+                if bounced_email:
+                    print(f"⛔ Skipping {lead_email} - previously bounced")
+                    results["skipped"] += 1
+                    results["skipped_bounced"] = results.get("skipped_bounced", 0) + 1
+                    continue
+                
+                # MX/SMTP VERIFICATION: Verify email is deliverable before sending
+                verifier = get_email_verifier()
+                verification = verifier.verify(lead_email)
+                if verification.status == VerificationStatus.INVALID:
+                    print(f"⛔ Skipping {lead_email} - failed MX/SMTP verification: {verification.reason}")
+                    results["skipped"] += 1
+                    results["skipped_invalid_mx_smtp"] = results.get("skipped_invalid_mx_smtp", 0) + 1
+                    continue
+                elif verification.status == VerificationStatus.RISKY:
+                    print(f"⚠️  Warning: {lead_email} is risky (score: {verification.score}) - {verification.reason}")
+                    # Continue but log the warning
+                
                 # SPAM PREVENTION: Check weekly limit
                 if not Email.can_email_lead(lead_id, max_emails_per_week=3):
                     print(f"⏭️  Skipping {lead_email} - hit weekly email limit")
                     results["skipped"] += 1
                     continue
+                
+                # LEAD ENRICHMENT: Crawl company website for REAL personalization data
+                # This replaces fake "I saw you're doing X" with actual observations
+                enrichment = get_enrichment_for_email(lead)
+                if not enrichment.get('has_enrichment'):
+                    print(f"   🔍 Enriching lead data from company website...")
+                    try:
+                        enrich_result = enrich_lead_sync(lead)
+                        if not enrich_result.get('error'):
+                            # Reload lead to get enrichment data
+                            lead = Lead.get_by_id(lead_id)
+                            print(f"   ✅ Enriched: {len(enrich_result.get('personalization_hooks', []))} personalization hooks found")
+                        else:
+                            print(f"   ⚠️ Enrichment failed: {enrich_result.get('error')} - will use fallback")
+                    except Exception as e:
+                        print(f"   ⚠️ Enrichment error: {e} - will use fallback")
+                else:
+                    print(f"   ✅ Using cached enrichment data")
+                
+                # ICP CLASSIFICATION: Classify lead before generating email (TK Kader Framework)
+                icp_classification = self.email_generator.classify_lead_icp(lead)
+                is_icp = icp_classification.get("is_icp", False)
+                icp_template = icp_classification.get("icp_template")
+                icp_score = icp_classification.get("icp_score", 0)
+                
+                if is_icp:
+                    print(f"   ✅ ICP Match (score: {icp_score}): {', '.join(icp_classification.get('icp_reasons', [])[:2])}")
+                else:
+                    print(f"   ⚠️ Non-ICP Lead (score: {icp_score}): {', '.join(icp_classification.get('non_icp_reasons', [])[:1])}")
+                
+                # Update lead with ICP classification
+                Lead.update_icp_classification(
+                    lead_id=lead_id,
+                    is_icp=is_icp,
+                    icp_template=icp_template,
+                    icp_score=icp_score,
+                    icp_reasons=icp_classification.get("icp_reasons", [])
+                )
                 
                 # Generate personalized email
                 print(f"📧 Generating email for {lead['full_name']} ({lead['email']})...")
@@ -248,14 +598,17 @@ class CampaignManager:
                         })
                         continue  # Skip to next lead
                 
-                # Create email record
+                # Create email record with ICP tracking
                 email_id = Email.create(
                     lead_id=lead_id,
                     campaign_id=campaign_id,
                     subject=email_content["subject"],
                     body=email_content["body"],
                     email_type="initial",
-                    followup_number=0
+                    followup_number=0,
+                    to_email=lead["email"],
+                    is_icp=is_icp,
+                    icp_template=icp_template
                 )
                 
                 if dry_run:
@@ -265,7 +618,9 @@ class CampaignManager:
                     results["details"].append({
                         "lead_email": lead["email"],
                         "subject": email_content["subject"],
-                        "status": "dry_run"
+                        "status": "dry_run",
+                        "is_icp": is_icp,
+                        "icp_score": icp_score
                     })
                 else:
                     # Send the email
@@ -319,8 +674,12 @@ class CampaignManager:
                                 "error": result.get("error")
                             })
                     else:
-                        # Store which account sent this email for follow-up threading
-                        Email.mark_sent(email_id, from_email=result.get("from_email"))
+                        # Store which account sent this email + Message-ID for follow-up threading
+                        Email.mark_sent(
+                            email_id, 
+                            from_email=result.get("from_email"),
+                            message_id=result.get("message_id")
+                        )
                         Campaign.increment_stat(campaign_id, "emails_sent")
                         results["sent"] += 1
                         results["details"].append({
@@ -399,6 +758,63 @@ class CampaignManager:
                 if not lead:
                     continue
                 
+                lead_email = lead.get("email", "")
+                
+                # DO-NOT-CONTACT CHECK: Skip emails on the blocklist
+                if DoNotContact.is_blocked(lead_email):
+                    reason = DoNotContact.get_reason(lead_email)
+                    print(f"🚫 Skipping followup for {lead_email} - on do-not-contact list (reason: {reason})")
+                    results["skipped_do_not_contact"] = results.get("skipped_do_not_contact", 0) + 1
+                    continue
+                
+                # BOUNCE CHECK: Skip leads that have bounced before (even if inconclusive in RR)
+                from database import emails_collection as ec_bounce_check
+                from bson import ObjectId
+                bounced_email = ec_bounce_check.find_one({
+                    'lead_id': ObjectId(lead_id),
+                    'status': 'bounced'
+                })
+                if bounced_email:
+                    print(f"⛔ Skipping followup for {lead_email} - previously bounced")
+                    results["skipped_bounced"] = results.get("skipped_bounced", 0) + 1
+                    continue
+                
+                # EMAIL VERIFICATION CHECK: Skip leads with known-invalid emails from RocketReach
+                raw_data = lead.get("raw_data", {})
+                rr_emails = raw_data.get("emails", [])
+                email_is_invalid = False
+                for e in rr_emails:
+                    if isinstance(e, dict) and e.get("email") == lead_email:
+                        smtp_valid = e.get("smtp_valid", "").lower()
+                        grade = e.get("grade", "")
+                        if smtp_valid == "invalid" or grade == "F":
+                            print(f"⛔ Skipping followup for {lead_email} - RocketReach marked INVALID")
+                            email_is_invalid = True
+                            results["skipped_invalid"] = results.get("skipped_invalid", 0) + 1
+                            break
+                if email_is_invalid:
+                    continue
+                
+                # MX/SMTP VERIFICATION: Verify email is deliverable before sending followup
+                verifier = get_email_verifier()
+                verification = verifier.verify(lead_email)
+                if verification.status == VerificationStatus.INVALID:
+                    print(f"⛔ Skipping followup for {lead_email} - failed MX/SMTP verification: {verification.reason}")
+                    results["skipped_invalid_mx_smtp"] = results.get("skipped_invalid_mx_smtp", 0) + 1
+                    continue
+                elif verification.status == VerificationStatus.RISKY:
+                    print(f"⚠️  Warning: {lead_email} is risky (score: {verification.score}) - {verification.reason}")
+                
+                # LEAD ENRICHMENT: Ensure we have enrichment data for follow-up personalization
+                enrichment = get_enrichment_for_email(lead)
+                if not enrichment.get('has_enrichment'):
+                    try:
+                        enrich_result = enrich_lead_sync(lead)
+                        if not enrich_result.get('error'):
+                            lead = Lead.get_by_id(lead_id)  # Reload with enrichment
+                    except Exception:
+                        pass  # Continue without enrichment
+                
                 # Get previous emails for context
                 previous_emails = Email.get_by_lead_and_campaign(lead_id, campaign_id)
                 previous_content = [
@@ -427,14 +843,21 @@ class CampaignManager:
                 if is_new_thread:
                     print(f"  → Starting NEW thread (different angle)")
                 
-                # Create email record
+                # Get ICP status from lead (already classified during initial email)
+                is_icp = lead.get("is_icp")
+                icp_template = lead.get("icp_template")
+                
+                # Create email record with ICP tracking
                 email_id = Email.create(
                     lead_id=lead_id,
                     campaign_id=campaign_id,
                     subject=email_content["subject"],
                     body=email_content["body"],
                     email_type="followup" if not is_new_thread else "followup_new_thread",
-                    followup_number=followup_number
+                    followup_number=followup_number,
+                    to_email=lead["email"],
+                    is_icp=is_icp,
+                    icp_template=icp_template
                 )
                 
                 if dry_run:
@@ -453,6 +876,17 @@ class CampaignManager:
                                 print(f"  → Using original sender: {original_sender}")
                                 break
                     
+                    # Get threading info for same-thread follow-ups
+                    # For new threads, we don't use In-Reply-To/References
+                    in_reply_to = None
+                    references = None
+                    if not is_new_thread:
+                        thread_info = Email.get_thread_info(lead_id, campaign_id)
+                        in_reply_to = thread_info.get("in_reply_to")
+                        references = thread_info.get("references")
+                        if in_reply_to:
+                            print(f"  → Threading: replying to {in_reply_to[:30]}...")
+                    
                     # Send the email (uses original sender if found, otherwise rotates)
                     result = self.email_sender.send_email(
                         to_email=lead["email"],
@@ -460,11 +894,17 @@ class CampaignManager:
                         body=email_content["body"],
                         to_name=lead.get("full_name"),
                         html_body=text_to_html(email_content["body"]),
-                        from_account=from_account
+                        from_account=from_account,
+                        in_reply_to=in_reply_to,
+                        references=references
                     )
                     
                     if result["success"]:
-                        Email.mark_sent(email_id, from_email=result.get("from_email"))
+                        Email.mark_sent(
+                            email_id, 
+                            from_email=result.get("from_email"),
+                            message_id=result.get("message_id")
+                        )
                         Campaign.increment_stat(campaign_id, "emails_sent")
                         results["sent"] += 1
                         results["details"].append({

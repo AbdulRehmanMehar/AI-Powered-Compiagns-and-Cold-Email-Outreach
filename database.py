@@ -139,6 +139,11 @@ class Lead:
             "rocketreach_id": data.get("id"),
             "raw_data": data,
             "updated_at": datetime.utcnow(),
+            # ICP Tracking (TK Kader Framework)
+            "is_icp": data.get("is_icp"),  # True/False - core classification
+            "icp_template": data.get("icp_template"),  # Which template matched
+            "icp_score": data.get("icp_score"),  # Confidence 0.0-1.0
+            "icp_reasons": data.get("icp_reasons", []),  # Why they matched
         }
         
         result = leads_collection.update_one(
@@ -198,7 +203,29 @@ class Lead:
         lead['title'] = lead.get('title') or ''
         lead['company'] = lead.get('company') or ''
         
+        # ICP fields (default to None for backwards compatibility)
+        lead['is_icp'] = lead.get('is_icp')
+        lead['icp_template'] = lead.get('icp_template')
+        lead['icp_score'] = lead.get('icp_score')
+        lead['icp_reasons'] = lead.get('icp_reasons', [])
+        
         return lead
+    
+    @staticmethod
+    def update_icp_classification(lead_id: str, is_icp: bool, icp_template: str = None,
+                                   icp_score: float = None, icp_reasons: List[str] = None):
+        """Update ICP classification for a lead"""
+        from bson import ObjectId
+        update = {
+            "is_icp": is_icp,
+            "icp_template": icp_template,
+            "icp_score": icp_score,
+            "icp_reasons": icp_reasons or []
+        }
+        leads_collection.update_one(
+            {"_id": ObjectId(lead_id)},
+            {"$set": update}
+        )
 
 
 class Email:
@@ -213,36 +240,46 @@ class Email:
     
     @staticmethod
     def create(lead_id: str, campaign_id: str, subject: str, body: str, 
-               email_type: str = "initial", followup_number: int = 0) -> str:
+               email_type: str = "initial", followup_number: int = 0,
+               to_email: str = None, is_icp: bool = None, icp_template: str = None) -> str:
         """Create a new email record"""
         from bson import ObjectId
         
         email = {
             "lead_id": ObjectId(lead_id),
             "campaign_id": ObjectId(campaign_id),
+            "to_email": to_email,  # Store recipient email for bounce lookups
             "subject": subject,
             "body": body,
-            "email_type": email_type,  # "initial" or "followup"
+            "email_type": email_type,  # "initial", "followup", or "followup_new_thread"
             "followup_number": followup_number,
             "status": Email.STATUS_PENDING,
+            "message_id": None,  # SMTP Message-ID for threading
+            "in_reply_to": None,  # Parent email's Message-ID
+            "references": [],  # Thread chain of Message-IDs
             "created_at": datetime.utcnow(),
             "scheduled_at": None,
             "sent_at": None,
             "opened_at": None,
             "replied_at": None,
             "error_message": None,
+            # ICP Tracking (denormalized for reporting)
+            "is_icp": is_icp,
+            "icp_template": icp_template,
         }
         
         result = emails_collection.insert_one(email)
         return str(result.inserted_id)
     
     @staticmethod
-    def mark_sent(email_id: str, from_email: str = None):
-        """Mark email as sent and store which account sent it"""
+    def mark_sent(email_id: str, from_email: str = None, message_id: str = None):
+        """Mark email as sent and store which account sent it + Message-ID for threading"""
         from bson import ObjectId
         update = {"status": Email.STATUS_SENT, "sent_at": datetime.utcnow()}
         if from_email:
             update["from_email"] = from_email
+        if message_id:
+            update["message_id"] = message_id
         emails_collection.update_one(
             {"_id": ObjectId(email_id)},
             {"$set": update}
@@ -262,6 +299,45 @@ class Email:
             sort=[("sent_at", 1)]  # Get the first email sent
         )
         return email.get("from_email") if email else None
+    
+    @staticmethod
+    def get_thread_info(lead_id: str, campaign_id: str) -> dict:
+        """
+        Get threading information for a follow-up email.
+        
+        Returns:
+            dict with:
+            - in_reply_to: Message-ID of the most recent email (to reply to)
+            - references: List of all Message-IDs in the thread chain
+            - first_message_id: Message-ID of the first email (thread root)
+        """
+        from bson import ObjectId
+        
+        # Get all sent emails for this lead/campaign, ordered by sent_at
+        emails = list(emails_collection.find(
+            {
+                "lead_id": ObjectId(lead_id),
+                "campaign_id": ObjectId(campaign_id),
+                "status": Email.STATUS_SENT,
+                "message_id": {"$exists": True, "$ne": None}
+            },
+            sort=[("sent_at", 1)]
+        ))
+        
+        if not emails:
+            return {"in_reply_to": None, "references": [], "first_message_id": None}
+        
+        # Collect all message IDs in order
+        message_ids = [e.get("message_id") for e in emails if e.get("message_id")]
+        
+        if not message_ids:
+            return {"in_reply_to": None, "references": [], "first_message_id": None}
+        
+        return {
+            "in_reply_to": message_ids[-1],  # Reply to the most recent email
+            "references": message_ids,  # Full thread chain
+            "first_message_id": message_ids[0]  # Thread root
+        }
     
     @staticmethod
     def has_been_contacted(lead_id: str) -> bool:
@@ -336,24 +412,39 @@ class Email:
     
     @staticmethod
     def get_pending_followups(campaign_id: str, days_since_last: int) -> List[Dict]:
-        """Get leads that need follow-up emails"""
+        """
+        Get leads that need follow-up emails.
+        
+        Only returns leads whose initial email has a message_id stored.
+        This ensures we can properly thread follow-ups (In-Reply-To header).
+        
+        Emails sent before threading support was added (2026-01-29 17:27 EST)
+        won't have message_id and will be automatically skipped.
+        """
         from bson import ObjectId
         from datetime import timedelta
         
         cutoff_date = datetime.utcnow() - timedelta(days=days_since_last)
         
         pipeline = [
-            {"$match": {"campaign_id": ObjectId(campaign_id), "status": Email.STATUS_SENT}},
+            # Only consider sent emails that have message_id (for threading)
+            {"$match": {
+                "campaign_id": ObjectId(campaign_id), 
+                "status": Email.STATUS_SENT,
+                "message_id": {"$exists": True, "$ne": None}  # Must have message_id for threading
+            }},
             {"$sort": {"sent_at": -1}},
             {"$group": {
                 "_id": "$lead_id",
                 "last_email": {"$first": "$$ROOT"},
-                "email_count": {"$sum": 1}
+                "email_count": {"$sum": 1},
+                "first_message_id": {"$last": "$message_id"}  # Get the first email's message_id
             }},
             {"$match": {
                 "last_email.sent_at": {"$lt": cutoff_date},
                 "email_count": {"$lt": config.MAX_FOLLOWUPS + 1},
-                "last_email.status": {"$nin": [Email.STATUS_REPLIED, Email.STATUS_BOUNCED]}
+                "last_email.status": {"$nin": [Email.STATUS_REPLIED, Email.STATUS_BOUNCED]},
+                "first_message_id": {"$ne": None}  # Double-check thread root exists
             }}
         ]
         
@@ -366,6 +457,94 @@ class Email:
             "lead_id": ObjectId(lead_id),
             "campaign_id": ObjectId(campaign_id)
         }).sort("created_at", 1))
+    
+    @staticmethod
+    def get_icp_analytics(campaign_id: str = None) -> Dict[str, Any]:
+        """
+        Get ICP performance analytics (TK Kader Framework).
+        
+        Returns reply rates, conversion rates broken down by:
+        - ICP vs Non-ICP leads
+        - By ICP template
+        
+        This data should feed back into ICP refinement.
+        """
+        from bson import ObjectId
+        
+        match_stage = {"status": {"$in": [Email.STATUS_SENT, Email.STATUS_REPLIED, Email.STATUS_OPENED]}}
+        if campaign_id:
+            match_stage["campaign_id"] = ObjectId(campaign_id)
+        
+        pipeline = [
+            {"$match": match_stage},
+            {"$group": {
+                "_id": {
+                    "is_icp": "$is_icp",
+                    "icp_template": "$icp_template"
+                },
+                "total_sent": {"$sum": 1},
+                "total_replied": {"$sum": {"$cond": [{"$eq": ["$status", Email.STATUS_REPLIED]}, 1, 0]}},
+                "total_opened": {"$sum": {"$cond": [{"$eq": ["$status", Email.STATUS_OPENED]}, 1, 0]}},
+            }},
+            {"$sort": {"_id.is_icp": -1, "total_sent": -1}}
+        ]
+        
+        results = list(emails_collection.aggregate(pipeline))
+        
+        # Process into readable format
+        analytics = {
+            "icp_leads": {"sent": 0, "replied": 0, "opened": 0, "reply_rate": 0},
+            "non_icp_leads": {"sent": 0, "replied": 0, "opened": 0, "reply_rate": 0},
+            "unknown_leads": {"sent": 0, "replied": 0, "opened": 0, "reply_rate": 0},  # Pre-ICP tracking
+            "by_template": {},
+            "total": {"sent": 0, "replied": 0, "opened": 0}
+        }
+        
+        for r in results:
+            is_icp = r["_id"].get("is_icp")
+            template = r["_id"].get("icp_template") or "unknown"
+            
+            sent = r["total_sent"]
+            replied = r["total_replied"]
+            opened = r["total_opened"]
+            
+            # Aggregate totals
+            analytics["total"]["sent"] += sent
+            analytics["total"]["replied"] += replied
+            analytics["total"]["opened"] += opened
+            
+            # By ICP status
+            if is_icp is True:
+                analytics["icp_leads"]["sent"] += sent
+                analytics["icp_leads"]["replied"] += replied
+                analytics["icp_leads"]["opened"] += opened
+            elif is_icp is False:
+                analytics["non_icp_leads"]["sent"] += sent
+                analytics["non_icp_leads"]["replied"] += replied
+                analytics["non_icp_leads"]["opened"] += opened
+            else:
+                analytics["unknown_leads"]["sent"] += sent
+                analytics["unknown_leads"]["replied"] += replied
+                analytics["unknown_leads"]["opened"] += opened
+            
+            # By template
+            if template not in analytics["by_template"]:
+                analytics["by_template"][template] = {"sent": 0, "replied": 0, "opened": 0, "reply_rate": 0}
+            analytics["by_template"][template]["sent"] += sent
+            analytics["by_template"][template]["replied"] += replied
+            analytics["by_template"][template]["opened"] += opened
+        
+        # Calculate reply rates
+        for key in ["icp_leads", "non_icp_leads", "unknown_leads"]:
+            if analytics[key]["sent"] > 0:
+                analytics[key]["reply_rate"] = round(analytics[key]["replied"] / analytics[key]["sent"] * 100, 2)
+        
+        for template in analytics["by_template"]:
+            if analytics["by_template"][template]["sent"] > 0:
+                rate = analytics["by_template"][template]["replied"] / analytics["by_template"][template]["sent"] * 100
+                analytics["by_template"][template]["reply_rate"] = round(rate, 2)
+        
+        return analytics
 
 
 class Campaign:
@@ -809,6 +988,99 @@ class FailedEmails:
         return {"total_failed": 0, "with_retries": 0, "max_retries_reached": 0}
 
 
+class DoNotContact:
+    """
+    Persistent blocklist for emails that should never be contacted.
+    
+    Reasons for blocking:
+    - unsubscribe: Recipient requested to be removed
+    - complaint: Spam complaint received
+    - manual: Manually added by user
+    - hard_bounce: Permanent delivery failure
+    """
+    
+    _collection = db["do_not_contact"]
+    _collection.create_index("email", unique=True)
+    _collection.create_index("added_at")
+    
+    REASON_UNSUBSCRIBE = "unsubscribe"
+    REASON_COMPLAINT = "complaint"
+    REASON_MANUAL = "manual"
+    REASON_HARD_BOUNCE = "hard_bounce"
+    REASON_AUTO_REPLY = "auto_reply_permanent"  # e.g., "no longer with company"
+    
+    @staticmethod
+    def add(email: str, reason: str, notes: str = None, source_email_id: str = None) -> bool:
+        """
+        Add an email to the do-not-contact list.
+        
+        Args:
+            email: Email address to block
+            reason: Why they're blocked (use REASON_* constants)
+            notes: Optional notes/context
+            source_email_id: ID of the email that triggered this (for audit trail)
+        
+        Returns:
+            True if added, False if already exists
+        """
+        email = email.lower().strip()
+        
+        try:
+            DoNotContact._collection.insert_one({
+                "email": email,
+                "reason": reason,
+                "notes": notes,
+                "source_email_id": source_email_id,
+                "added_at": datetime.utcnow()
+            })
+            print(f"   🚫 Added {email} to do-not-contact list (reason: {reason})")
+            return True
+        except Exception:
+            # Already exists (duplicate key error)
+            return False
+    
+    @staticmethod
+    def is_blocked(email: str) -> bool:
+        """Check if an email is on the do-not-contact list"""
+        email = email.lower().strip()
+        return DoNotContact._collection.find_one({"email": email}) is not None
+    
+    @staticmethod
+    def get_reason(email: str) -> Optional[str]:
+        """Get the reason an email is blocked (or None if not blocked)"""
+        email = email.lower().strip()
+        record = DoNotContact._collection.find_one({"email": email})
+        return record.get("reason") if record else None
+    
+    @staticmethod
+    def remove(email: str) -> bool:
+        """Remove an email from the do-not-contact list"""
+        email = email.lower().strip()
+        result = DoNotContact._collection.delete_one({"email": email})
+        return result.deleted_count > 0
+    
+    @staticmethod
+    def get_all(reason: str = None, limit: int = 100) -> List[Dict]:
+        """Get all blocked emails, optionally filtered by reason"""
+        query = {"reason": reason} if reason else {}
+        return list(DoNotContact._collection.find(query).limit(limit))
+    
+    @staticmethod
+    def count(reason: str = None) -> int:
+        """Count blocked emails, optionally filtered by reason"""
+        query = {"reason": reason} if reason else {}
+        return DoNotContact._collection.count_documents(query)
+    
+    @staticmethod
+    def get_stats() -> Dict[str, int]:
+        """Get count by reason"""
+        pipeline = [
+            {"$group": {"_id": "$reason", "count": {"$sum": 1}}}
+        ]
+        results = list(DoNotContact._collection.aggregate(pipeline))
+        return {r["_id"]: r["count"] for r in results}
+
+
 class SearchOffsetTracker:
     """
     Track search pagination offsets to avoid re-searching the same people.
@@ -871,4 +1143,355 @@ class SearchOffsetTracker:
     def get_all_offsets() -> List[Dict]:
         """Get all tracked offsets for debugging"""
         return list(SearchOffsetTracker._collection.find({}, {"_id": 0}))
+
+
+class SchedulerConfig:
+    """
+    MongoDB-based scheduler configuration for fully autonomous operation.
+    
+    Stores:
+    - Scheduled campaigns (times, days, settings)
+    - ICP run history (when each ICP was last used)
+    - Performance-based adjustments
+    - System settings
+    
+    This replaces the static scheduler_config.json file.
+    """
+    
+    _collection = db["scheduler_config"]
+    _run_history = db["icp_run_history"]
+    
+    # Create indexes
+    _collection.create_index("config_type", unique=True)
+    _run_history.create_index([("icp_template", 1), ("run_date", -1)])
+    _run_history.create_index("run_date")
+    
+    # Config types
+    CONFIG_MAIN = "main"
+    CONFIG_SETTINGS = "settings"
+    
+    @staticmethod
+    def initialize_default_config():
+        """
+        Initialize with default autonomous configuration.
+        Only runs if no config exists yet.
+        """
+        existing = SchedulerConfig._collection.find_one({"config_type": SchedulerConfig.CONFIG_MAIN})
+        if existing:
+            return existing
+        
+        default_config = {
+            "config_type": SchedulerConfig.CONFIG_MAIN,
+            "mode": "autonomous",  # "autonomous" or "manual"
+            "scheduled_campaigns": [
+                {
+                    "name": "morning_campaign",
+                    "autonomous": True,
+                    "schedule_time": "09:30",
+                    "days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+                    "max_leads": 15,
+                    "enabled": True
+                },
+                {
+                    "name": "afternoon_campaign",
+                    "autonomous": True,
+                    "schedule_time": "14:30",
+                    "days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+                    "max_leads": 15,
+                    "enabled": True
+                }
+            ],
+            "schedules": {
+                "followup_check": "11:00",
+                "initial_emails": "09:30"
+            },
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+        
+        SchedulerConfig._collection.insert_one(default_config)
+        
+        # Also initialize settings
+        default_settings = {
+            "config_type": SchedulerConfig.CONFIG_SETTINGS,
+            "timezone": "America/New_York",  # US Eastern - target audience timezone
+            "pause_weekends": True,
+            "max_emails_per_day_per_mailbox": 25,
+            "min_delay_minutes": 7,
+            "max_delay_minutes": 12,
+            "exploration_rate": 0.3,  # 30% chance to try underperforming ICPs
+            "min_days_between_same_icp": 2,  # Don't run same ICP 2 days in a row
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+        
+        SchedulerConfig._collection.update_one(
+            {"config_type": SchedulerConfig.CONFIG_SETTINGS},
+            {"$set": default_settings},
+            upsert=True
+        )
+        
+        return default_config
+    
+    @staticmethod
+    def get_config() -> Dict[str, Any]:
+        """Get the main scheduler configuration."""
+        config = SchedulerConfig._collection.find_one({"config_type": SchedulerConfig.CONFIG_MAIN})
+        if not config:
+            config = SchedulerConfig.initialize_default_config()
+        return config
+    
+    @staticmethod
+    def get_settings() -> Dict[str, Any]:
+        """Get scheduler settings."""
+        settings = SchedulerConfig._collection.find_one({"config_type": SchedulerConfig.CONFIG_SETTINGS})
+        if not settings:
+            SchedulerConfig.initialize_default_config()
+            settings = SchedulerConfig._collection.find_one({"config_type": SchedulerConfig.CONFIG_SETTINGS})
+        return settings
+    
+    @staticmethod
+    def update_setting(key: str, value: Any):
+        """Update a specific setting."""
+        SchedulerConfig._collection.update_one(
+            {"config_type": SchedulerConfig.CONFIG_SETTINGS},
+            {"$set": {key: value, "updated_at": datetime.utcnow()}}
+        )
+    
+    @staticmethod
+    def add_scheduled_campaign(campaign: Dict) -> bool:
+        """Add a new scheduled campaign."""
+        SchedulerConfig._collection.update_one(
+            {"config_type": SchedulerConfig.CONFIG_MAIN},
+            {
+                "$push": {"scheduled_campaigns": campaign},
+                "$set": {"updated_at": datetime.utcnow()}
+            }
+        )
+        return True
+    
+    @staticmethod
+    def update_scheduled_campaign(campaign_name: str, updates: Dict):
+        """Update a scheduled campaign by name."""
+        SchedulerConfig._collection.update_one(
+            {
+                "config_type": SchedulerConfig.CONFIG_MAIN,
+                "scheduled_campaigns.name": campaign_name
+            },
+            {
+                "$set": {
+                    "scheduled_campaigns.$": {**updates, "name": campaign_name},
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+    
+    @staticmethod
+    def enable_campaign(campaign_name: str, enabled: bool = True):
+        """Enable or disable a scheduled campaign."""
+        SchedulerConfig._collection.update_one(
+            {
+                "config_type": SchedulerConfig.CONFIG_MAIN,
+                "scheduled_campaigns.name": campaign_name
+            },
+            {
+                "$set": {
+                    "scheduled_campaigns.$.enabled": enabled,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+    
+    # ==================== ICP Run History ====================
+    
+    @staticmethod
+    def record_icp_run(icp_template: str, campaign_id: str = None, 
+                       leads_sent: int = 0, results: Dict = None):
+        """
+        Record that an ICP was used for a campaign run.
+        This is critical for autonomous rotation and learning.
+        """
+        run_record = {
+            "icp_template": icp_template,
+            "run_date": datetime.utcnow(),
+            "campaign_id": campaign_id,
+            "leads_sent": leads_sent,
+            "results": results or {},
+            "day_of_week": datetime.utcnow().strftime("%A").lower()
+        }
+        SchedulerConfig._run_history.insert_one(run_record)
+    
+    @staticmethod
+    def get_last_run(icp_template: str) -> Optional[Dict]:
+        """Get the last time this ICP was used."""
+        return SchedulerConfig._run_history.find_one(
+            {"icp_template": icp_template},
+            sort=[("run_date", -1)]
+        )
+    
+    @staticmethod
+    def get_runs_today() -> List[Dict]:
+        """Get all ICP runs from today."""
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        return list(SchedulerConfig._run_history.find(
+            {"run_date": {"$gte": today_start}}
+        ))
+    
+    @staticmethod
+    def get_icps_used_recently(days: int = 2) -> List[str]:
+        """Get ICPs used in the last N days (for rotation)."""
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        runs = SchedulerConfig._run_history.find(
+            {"run_date": {"$gte": cutoff}},
+            {"icp_template": 1}
+        )
+        return list(set(r["icp_template"] for r in runs))
+    
+    @staticmethod
+    def get_icp_run_stats(days: int = 30) -> Dict[str, Any]:
+        """
+        Get statistics on ICP runs for the last N days.
+        Used for autonomous ICP selection.
+        """
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        
+        pipeline = [
+            {"$match": {"run_date": {"$gte": cutoff}}},
+            {"$group": {
+                "_id": "$icp_template",
+                "total_runs": {"$sum": 1},
+                "total_leads": {"$sum": "$leads_sent"},
+                "last_run": {"$max": "$run_date"},
+                "days_since_last_run": {"$max": "$run_date"}
+            }},
+            {"$sort": {"total_runs": -1}}
+        ]
+        
+        results = list(SchedulerConfig._run_history.aggregate(pipeline))
+        
+        # Calculate days since last run
+        now = datetime.utcnow()
+        for r in results:
+            if r.get("last_run"):
+                r["days_since_last_run"] = (now - r["last_run"]).days
+            else:
+                r["days_since_last_run"] = 999
+        
+        return {
+            "by_icp": {r["_id"]: r for r in results},
+            "total_runs": sum(r["total_runs"] for r in results),
+            "period_days": days
+        }
+    
+    @staticmethod
+    def select_icp_for_autonomous_run() -> Dict[str, Any]:
+        """
+        CORE AUTONOMOUS SELECTION ALGORITHM
+        
+        Selects the best ICP to run next based on:
+        1. Performance data (reply rates from Email.get_icp_analytics)
+        2. Recency (avoid using same ICP too frequently)
+        3. Exploration (occasionally try underperformers)
+        
+        Returns:
+            Dict with selected_icp, reason, and scoring details
+        """
+        import random
+        from primestrides_context import ICP_TEMPLATES
+        
+        settings = SchedulerConfig.get_settings()
+        exploration_rate = settings.get("exploration_rate", 0.3)
+        min_days_gap = settings.get("min_days_between_same_icp", 2)
+        
+        # Get performance analytics
+        analytics = Email.get_icp_analytics()
+        by_template = analytics.get("by_template", {})
+        
+        # Get run history
+        run_stats = SchedulerConfig.get_icp_run_stats(days=30)
+        icps_used_recently = SchedulerConfig.get_icps_used_recently(days=min_days_gap)
+        icps_used_today = [r["icp_template"] for r in SchedulerConfig.get_runs_today()]
+        
+        all_templates = list(ICP_TEMPLATES.keys())
+        
+        # Score each ICP
+        scored_icps = []
+        
+        for template in all_templates:
+            perf = by_template.get(template, {"sent": 0, "replied": 0, "reply_rate": 0})
+            run_info = run_stats.get("by_icp", {}).get(template, {})
+            
+            sent = perf.get("sent", 0)
+            reply_rate = perf.get("reply_rate", 0)
+            days_since_run = run_info.get("days_since_last_run", 999)
+            
+            # Skip if used today already
+            if template in icps_used_today:
+                continue
+            
+            # Base score from performance
+            if sent == 0:
+                # Never tested - high exploration value
+                performance_score = 50
+                reason = "Never tested - exploring"
+            elif sent < 20:
+                # Low data - moderate exploration
+                performance_score = 30 + reply_rate * 2
+                reason = f"Low data ({sent} sent) - exploring"
+            else:
+                # Enough data - use performance
+                performance_score = reply_rate * 10
+                reason = f"Performance: {reply_rate}% reply rate"
+            
+            # Recency bonus (prefer ICPs not used recently)
+            if template in icps_used_recently:
+                recency_penalty = -30
+                reason += " (used recently, -30)"
+            elif days_since_run > 7:
+                recency_bonus = min(20, days_since_run)
+                performance_score += recency_bonus
+                reason += f" (+{recency_bonus} recency)"
+            else:
+                recency_penalty = 0
+                performance_score += recency_penalty
+            
+            final_score = max(0, performance_score)
+            
+            scored_icps.append({
+                "template": template,
+                "score": final_score,
+                "reason": reason,
+                "sent": sent,
+                "reply_rate": reply_rate,
+                "days_since_run": days_since_run
+            })
+        
+        if not scored_icps:
+            # All ICPs used today - pick least recently used
+            scored_icps = [{"template": t, "score": 0, "reason": "fallback"} for t in all_templates]
+        
+        # Sort by score
+        scored_icps.sort(key=lambda x: x["score"], reverse=True)
+        
+        # Exploration vs Exploitation
+        if random.random() < exploration_rate and len(scored_icps) > 1:
+            # Explore: Pick from top 3 randomly (weighted by score)
+            top_candidates = scored_icps[:min(3, len(scored_icps))]
+            weights = [max(1, c["score"]) for c in top_candidates]
+            selected = random.choices(top_candidates, weights=weights, k=1)[0]
+            selection_mode = "exploration"
+        else:
+            # Exploit: Pick the best
+            selected = scored_icps[0]
+            selection_mode = "exploitation"
+        
+        return {
+            "selected_icp": selected["template"],
+            "selection_reason": selected["reason"],
+            "selection_mode": selection_mode,
+            "score": selected["score"],
+            "all_scores": {s["template"]: {"score": s["score"], "reason": s["reason"]} 
+                          for s in scored_icps[:5]},
+            "icps_excluded_today": icps_used_today
+        }
 

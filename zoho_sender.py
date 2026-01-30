@@ -1,7 +1,7 @@
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.utils import formataddr
+from email.utils import formataddr, make_msgid
 from typing import Optional, List, Dict
 import config
 import time
@@ -263,7 +263,9 @@ class ZohoEmailSender:
                    bcc: List[str] = None,
                    reply_to: str = None,
                    from_account: Dict[str, str] = None,
-                   bypass_time_check: bool = False) -> dict:
+                   bypass_time_check: bool = False,
+                   in_reply_to: str = None,
+                   references: List[str] = None) -> dict:
         """
         Send an email through Zoho (auto-rotates accounts)
         
@@ -278,9 +280,11 @@ class ZohoEmailSender:
             reply_to: Reply-to address (optional)
             from_account: Specific account to use (optional, auto-selects if not provided)
             bypass_time_check: Skip business hours check (for testing)
+            in_reply_to: Message-ID of the email being replied to (for threading)
+            references: List of Message-IDs in the thread (for threading)
         
         Returns:
-            Dict with 'success', 'message'/'error', 'from_email', and optionally 'skip_reason'
+            Dict with 'success', 'message'/'error', 'from_email', 'message_id', and optionally 'skip_reason'
         """
         from database import SendingStats, AccountCooldown
         
@@ -388,6 +392,21 @@ class ZohoEmailSender:
             else:
                 msg = MIMEText(body, 'plain')
             
+            # Generate a unique Message-ID for this email
+            # Use the sender's domain for proper formatting
+            domain = from_email.split('@')[1] if '@' in from_email else 'primestrides.com'
+            message_id = make_msgid(domain=domain)
+            msg['Message-ID'] = message_id
+            
+            # Set threading headers if this is a reply/follow-up
+            if in_reply_to:
+                msg['In-Reply-To'] = in_reply_to
+                # References should include the entire thread chain
+                if references:
+                    msg['References'] = ' '.join(references)
+                else:
+                    msg['References'] = in_reply_to
+            
             # Set headers
             msg['Subject'] = subject
             msg['From'] = formataddr((from_name, from_email))
@@ -428,7 +447,12 @@ class ZohoEmailSender:
             daily_limit = self._get_daily_limit_for_account(from_email)
             
             print(f"   ✉️  Sent to {to_email} (from {from_email}) [{sends_today}/{daily_limit} today]")
-            return {"success": True, "message": f"Email sent to {to_email}", "from_email": from_email}
+            return {
+                "success": True, 
+                "message": f"Email sent to {to_email}", 
+                "from_email": from_email,
+                "message_id": message_id  # Return Message-ID for threading
+            }
             
         except smtplib.SMTPException as e:
             error_msg = f"SMTP error sending to {to_email}: {str(e)}"

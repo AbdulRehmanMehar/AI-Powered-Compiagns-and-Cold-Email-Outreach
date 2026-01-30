@@ -493,7 +493,43 @@ class RocketReachClient:
                     emails = detailed.get("emails", []) or detailed.get("current_personal_email", []) or detailed.get("professional_emails", [])
                     
                     if emails:
-                        email = emails[0] if isinstance(emails[0], str) else emails[0].get("email")
+                        # CRITICAL: Use RocketReach's pre-validated email data!
+                        # Pick the BEST email based on RocketReach's smtp_valid and grade
+                        email = None
+                        email_data = None
+                        
+                        for e in emails:
+                            if isinstance(e, str):
+                                email = e
+                                break
+                            else:
+                                e_addr = e.get("email")
+                                e_valid = e.get("smtp_valid", "").lower()
+                                e_grade = e.get("grade", "F")
+                                
+                                # Skip explicitly invalid emails from RocketReach
+                                if e_valid == "invalid":
+                                    print(f"   ⚠️ Skipping {e_addr} - RocketReach marked invalid (grade: {e_grade})")
+                                    continue
+                                
+                                # Skip F-grade emails
+                                if e_grade == "F":
+                                    print(f"   ⚠️ Skipping {e_addr} - RocketReach grade F")
+                                    continue
+                                
+                                # Prefer valid emails, then inconclusive, skip invalid
+                                if e_valid == "valid":
+                                    email = e_addr
+                                    email_data = e
+                                    break
+                                elif e_valid in ("inconclusive", "unknown", "") and email is None:
+                                    # Use inconclusive only if no valid found yet
+                                    email = e_addr
+                                    email_data = e
+                        
+                        if not email:
+                            print(f"   ⚠️ No valid emails found for {profile.get('name')} - all marked invalid by RocketReach")
+                            continue
                         
                         # Skip if already contacted (check BEFORE adding)
                         if email and email.lower() in exclude_emails:
@@ -501,6 +537,7 @@ class RocketReachClient:
                             continue
                         
                         # VERIFY EMAIL before accepting (reduces bounces)
+                        # Only do our own SMTP check if RocketReach didn't already validate it
                         if self.verify_emails:
                             # Quick checks first (instant)
                             is_valid, reason = quick_email_check(email)

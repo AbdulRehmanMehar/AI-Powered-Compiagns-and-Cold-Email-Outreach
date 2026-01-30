@@ -20,8 +20,7 @@ Key guidelines enforced:
 8. NO banned phrases that scream "cold email"
 """
 
-from openai import OpenAI
-from email_generator import humanize_email  # Import humanize function
+from email_generator import humanize_email, get_llm_client  # Import humanize function and LLM client
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -167,6 +166,25 @@ BANNED_PHRASES = [
     "i wanted to",
     "i'd love to",
     "i would love to",
+    
+    # LAZY GENERIC PHRASES (sound templated, not human)
+    "scaling is hard",
+    "scaling is tough",
+    "growth is hard",
+    "growth is tough",
+    "scaling fast is hard",
+    "scaling fast is tough",
+    "growth must be tough",
+    "must be tough",
+    "must hurt",
+    "must be a pain",
+    "must be crazy",
+    "must be a headache",
+    "must be a challenge",
+    "must be brutal",
+    "growing fast is tough",
+    "growing fast is hard",
+    "funding is a challenge",
     
     # Follow-up phrases in initial emails
     "touching base",
@@ -327,8 +345,8 @@ SPAM_TRIGGER_WORDS = [
 
 class EmailReviewer:
     """
-    Production-ready email reviewer that uses OpenAI to critically evaluate
-    cold emails against expert guidelines.
+    Production-ready email reviewer that uses the configured LLM provider
+    (Groq or OpenAI) to critically evaluate cold emails against expert guidelines.
     
     SELF-IMPROVEMENT: 
     - Stores all reviews in MongoDB
@@ -337,13 +355,15 @@ class EmailReviewer:
     """
     
     def __init__(self):
-        self.client = OpenAI(api_key=config.OPENAI_API_KEY)
-        self.model = "gpt-4.1-mini"
+        # Use the same LLM client as email_generator (respects LLM_PROVIDER config)
+        self.client, self.model, self.provider = get_llm_client()
+        print(f"📋 Email reviewer using: {self.provider.upper()} ({self.model})")
         
         # Thresholds
         self.min_passing_score = 70
         self.warning_threshold = 80
         self.max_word_count = 75
+        self.min_word_count = 25  # NEW: Minimum word count (too short = robotic)
         self.ideal_word_count_min = 40
         self.ideal_word_count_max = 65
         self.max_subject_words = 4
@@ -577,6 +597,7 @@ class EmailReviewer:
         
         body_lower = body.lower()
         subject_lower = subject.lower()
+        company = lead.get('company', '').lower()
         
         # =================================================================
         # CHECK 1: Word count (CRITICAL)
@@ -593,6 +614,18 @@ class EmailReviewer:
                 "required": self.max_word_count
             })
             suggestions.append(f"Cut {word_count - self.max_word_count} words. Remove filler and keep only essential points.")
+        elif word_count < self.min_word_count:
+            # NEW: Too short is now a VIOLATION (not warning)
+            violations.append(f"Word count {word_count} below minimum of {self.min_word_count} - too robotic")
+            penalty += 25
+            issues.append({
+                "type": "word_count_too_low",
+                "severity": "critical",
+                "message": f"Email is only {word_count} words. Minimum is {self.min_word_count}. This feels robotic.",
+                "current": word_count,
+                "required": self.min_word_count
+            })
+            suggestions.append(f"Add {self.min_word_count - word_count} more words. Include specific company observation or expand the pain point.")
         elif word_count > self.ideal_word_count_max:
             penalty += 5
             issues.append({
@@ -609,6 +642,47 @@ class EmailReviewer:
                 "severity": "warning",
                 "message": f"Email might be too short ({word_count} words). May lack substance.",
             })
+        
+        # =================================================================
+        # CHECK 1.5: TEMPLATED OPENER DETECTION (NEW)
+        # =================================================================
+        first_line = body.split('\n')[0].strip().lower() if body else ""
+        
+        # These patterns indicate a lazy, templated email
+        templated_opener_patterns = [
+            (r"^(random|odd|quick)\s+(thought|q)\.\s+\w+('s|s)?\s+(scaling|growth|growing)\s+(is\s+)?(fast|hard|tough)", "Templated opener: '[type]. [Company] scaling [adjective]' - too robotic"),
+            (r"^(random|odd|quick)\s+(thought|q)\.\s+\w+\s+scaling\s+fast\b", "Templated opener: starts with generic '[type]. [Company] scaling fast'"),
+            (r"^(random|odd|quick)\s+(thought|q)\.\s+\w+('s)?\s+growth\s+(is\s+)?(fast|tough|hard)", "Templated opener: '[type]. [Company] growth is [adjective]'"),
+            (r"^(random|odd|quick)\s+(thought|q)\.\s+scaling\s+(at\s+)?\w+\s+must", "Templated opener: 'scaling at [Company] must...' pattern"),
+        ]
+        
+        import re
+        for pattern, message in templated_opener_patterns:
+            if re.search(pattern, first_line):
+                violations.append(message)
+                penalty += 20
+                issues.append({
+                    "type": "templated_opener",
+                    "severity": "critical",
+                    "message": message,
+                    "line": first_line[:60]
+                })
+                suggestions.append("Write a unique opener. Don't just say '[Company] scaling fast' - reference something SPECIFIC about them.")
+                break  # Only flag one pattern
+        
+        # Check for repetitive "scaling fast" / "growth is tough" anywhere
+        lazy_patterns = [
+            (r"\bscaling fast\b.*\bscaling is (hard|tough)\b", "Redundant: says 'scaling fast' then 'scaling is hard/tough'"),
+            (r"\bgrowth is (fast|tough|hard)\.\s*(scaling|growth) is (tough|hard)", "Redundant: repeats growth/scaling difficulty"),
+        ]
+        for pattern, message in lazy_patterns:
+            if re.search(pattern, body_lower):
+                penalty += 15
+                issues.append({
+                    "type": "redundant_phrases",
+                    "severity": "warning",
+                    "message": message,
+                })
         
         # =================================================================
         # CHECK 2: Banned phrases (CRITICAL)

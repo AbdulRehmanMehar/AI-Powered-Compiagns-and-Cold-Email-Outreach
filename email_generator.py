@@ -124,19 +124,25 @@ def humanize_email(text: str) -> str:
 # GROQ RATE LIMITING WITH MONGODB STORAGE & MODEL FALLBACK
 # =============================================================================
 
-# Rate limits by model (requests per day, requests per minute)
+# Rate limits by model (requests per day, requests per minute, tokens per day)
+# Groq's actual limit is ~100k tokens/day per model for free tier
+# Updated 2026-01-30 with currently available models from Groq
 GROQ_MODEL_LIMITS = {
-    'llama-3.3-70b-versatile': {'daily': 900, 'per_minute': 25},
-    'llama-3.1-8b-instant': {'daily': 14000, 'per_minute': 25},
-    'llama-3.1-70b-versatile': {'daily': 14000, 'per_minute': 25},
-    'mixtral-8x7b-32768': {'daily': 14000, 'per_minute': 25},
+    'llama-3.3-70b-versatile': {'daily': 900, 'per_minute': 25, 'tokens_per_day': 100000},
+    'llama-3.1-8b-instant': {'daily': 14000, 'per_minute': 25, 'tokens_per_day': 500000},
+    'qwen/qwen3-32b': {'daily': 14000, 'per_minute': 25, 'tokens_per_day': 500000},
+    'meta-llama/llama-4-maverick-17b-128e-instruct': {'daily': 14000, 'per_minute': 25, 'tokens_per_day': 500000},
 }
 
-# Fallback chain: try models in order until one works
+# Aggressive fallback chain - distribute load across models
+# Strategy: Use high-quality models first, with aggressive fallback to others
+# Updated 2026-01-30 - removed decommissioned models
 GROQ_FALLBACK_CHAIN = [
-    'llama-3.3-70b-versatile',   # Best quality (1K/day)
-    'llama-3.1-70b-versatile',   # Great quality (14K/day)
-    'llama-3.1-8b-instant',       # Good quality, highest limit (14.4K/day)
+    'llama-3.3-70b-versatile',                         # Best quality (100k tokens/day)
+    'qwen/qwen3-32b',                                   # Good 32B model (500k tokens/day)
+    'meta-llama/llama-4-maverick-17b-128e-instruct',   # Llama 4 17B (500k tokens/day)
+    'llama-3.1-8b-instant',                            # Fast 8B model (500k tokens/day) - last resort
+    'llama-3.1-8b-instant',       # POOR quality - last resort only (14.4K/day)
 ]
 
 # In-memory cache (synced with DB periodically)
@@ -184,13 +190,14 @@ class GroqRateLimiter:
             if doc:
                 return {
                     'daily_count': doc.get('daily_count', 0),
+                    'tokens_used': doc.get('tokens_used', 0),
                     'minute_requests': doc.get('minute_requests', []),
                     'date': today
                 }
         except Exception as e:
             print(f"   ⚠️ Error loading rate limit from DB: {e}")
         
-        return {'daily_count': 0, 'minute_requests': [], 'date': today}
+        return {'daily_count': 0, 'tokens_used': 0, 'minute_requests': [], 'date': today}
     
     def _save_to_db(self, model: str, data: dict):
         """Save usage data to MongoDB"""
@@ -200,6 +207,7 @@ class GroqRateLimiter:
                 {"model": model, "date": today},
                 {"$set": {
                     "daily_count": data['daily_count'],
+                    "tokens_used": data.get('tokens_used', 0),
                     "minute_requests": data['minute_requests'][-100:],  # Keep last 100 timestamps
                     "updated_at": datetime.datetime.utcnow()
                 }},
@@ -226,13 +234,19 @@ class GroqRateLimiter:
         Check if model is within rate limits.
         Returns (can_proceed, wait_seconds, reason)
         """
-        limits = GROQ_MODEL_LIMITS.get(model, {'daily': 900, 'per_minute': 25})
+        limits = GROQ_MODEL_LIMITS.get(model, {'daily': 900, 'per_minute': 25, 'tokens_per_day': 100000})
         data = self._get_cache(model)
         now = time.time()
         
-        # Check daily limit
+        # Check daily request limit
         if data['daily_count'] >= limits['daily']:
             return False, 0, "daily_limit"
+        
+        # Check estimated token limit (estimate ~2000 tokens per request for safety)
+        tokens_used = data.get('tokens_used', 0)
+        token_limit = limits.get('tokens_per_day', 100000)
+        if tokens_used >= token_limit * 0.95:  # Leave 5% buffer
+            return False, 0, "token_limit"
         
         # Clean old minute requests
         data['minute_requests'] = [t for t in data['minute_requests'] if now - t < 60]
@@ -244,10 +258,11 @@ class GroqRateLimiter:
         
         return True, 0, "ok"
     
-    def record_request(self, model: str):
-        """Record a successful API request"""
+    def record_request(self, model: str, tokens_used: int = 2000):
+        """Record a successful API request with estimated token usage"""
         data = self._get_cache(model)
         data['daily_count'] += 1
+        data['tokens_used'] = data.get('tokens_used', 0) + tokens_used
         data['minute_requests'].append(time.time())
         
         # Save to DB periodically (every 5 requests to reduce writes)
@@ -257,18 +272,37 @@ class GroqRateLimiter:
     def get_best_available_model(self, preferred_model: str = None) -> Optional[str]:
         """
         Get the best available model from the fallback chain.
+        AGGRESSIVE: Distributes load across models to avoid hitting any single model's limit.
         Returns None if all models are rate limited.
         """
         chain = GROQ_FALLBACK_CHAIN.copy()
         
-        # Put preferred model first if specified
-        if preferred_model and preferred_model in chain:
-            chain.remove(preferred_model)
-            chain.insert(0, preferred_model)
-        
+        # Get usage stats for smart selection
+        model_stats = {}
         for model in chain:
+            data = self._get_cache(model)
+            limits = GROQ_MODEL_LIMITS.get(model, {'tokens_per_day': 100000})
+            tokens_used = data.get('tokens_used', 0)
+            token_limit = limits.get('tokens_per_day', 100000)
+            usage_percent = (tokens_used / token_limit) * 100 if token_limit > 0 else 100
+            model_stats[model] = usage_percent
+        
+        # AGGRESSIVE STRATEGY: Prefer the model with the most capacity remaining
+        # Sort by usage percentage (lowest first)
+        sorted_models = sorted(chain, key=lambda m: model_stats.get(m, 100))
+        
+        # If preferred model has < 80% usage, still use it for quality
+        if preferred_model and model_stats.get(preferred_model, 100) < 80:
+            sorted_models.remove(preferred_model)
+            sorted_models.insert(0, preferred_model)
+        
+        for model in sorted_models:
             can_proceed, wait_time, reason = self.check_limit(model)
             if can_proceed:
+                # Log when using fallback
+                if model != (preferred_model or GROQ_FALLBACK_CHAIN[0]):
+                    usage = model_stats.get(model, 0)
+                    print(f"   🔄 Using {model} ({usage:.0f}% capacity used)")
                 return model
             elif reason == "minute_limit" and wait_time < 5:
                 # Short wait is acceptable
@@ -278,17 +312,23 @@ class GroqRateLimiter:
         return None
     
     def get_usage_stats(self) -> dict:
-        """Get current usage statistics for all models"""
+        """Get current usage statistics for all models including token usage"""
         stats = {}
         today = self._get_today()
         
         for model, limits in GROQ_MODEL_LIMITS.items():
             data = self._get_cache(model)
+            token_limit = limits.get('tokens_per_day', 100000)
+            tokens_used = data.get('tokens_used', 0)
+            
             stats[model] = {
                 'daily_used': data['daily_count'],
                 'daily_limit': limits['daily'],
                 'daily_remaining': limits['daily'] - data['daily_count'],
-                'percent_used': round(data['daily_count'] / limits['daily'] * 100, 1)
+                'tokens_used': tokens_used,
+                'tokens_limit': token_limit,
+                'tokens_remaining': token_limit - tokens_used,
+                'percent_used': round(tokens_used / token_limit * 100, 1) if token_limit > 0 else 0
             }
         
         return stats
@@ -308,6 +348,88 @@ def get_rate_limiter() -> GroqRateLimiter:
     if _rate_limiter is None:
         _rate_limiter = GroqRateLimiter()
     return _rate_limiter
+
+
+def get_industry_pain_point(industry: str, title: str, enrichment: dict = None) -> str:
+    """
+    Use AI to generate a SPECIFIC pain point based on context.
+    LeadGenJay: "Generic pain points like 'scaling is hard' get deleted instantly"
+    
+    The AI considers:
+    - What the company actually does (from enrichment)
+    - The person's role/title
+    - Industry context
+    """
+    # Build context for AI
+    context_parts = []
+    if enrichment:
+        if enrichment.get('what_they_do'):
+            context_parts.append(f"Company does: {enrichment['what_they_do']}")
+        if enrichment.get('their_space'):
+            context_parts.append(f"Industry/space: {enrichment['their_space']}")
+        if enrichment.get('pain_point_guess'):
+            context_parts.append(f"Suspected challenge: {enrichment['pain_point_guess']}")
+    
+    if industry and industry not in ['Unknown', 'N/A', '']:
+        context_parts.append(f"Industry: {industry}")
+    
+    context = "\n".join(context_parts) if context_parts else f"Industry: {industry or 'tech startup'}"
+    
+    prompt = f"""Based on this company context, write ONE specific pain point statement that someone with the title "{title}" would relate to.
+
+CONTEXT:
+{context}
+
+RULES:
+1. Be SPECIFIC to what this company does - no generic "scaling is hard" statements
+2. Write from THEIR perspective - what keeps them up at night?
+3. Make it feel like you understand their daily struggle
+4. Keep it under 20 words
+5. Don't start with "you" - start with the situation
+
+EXAMPLES of good pain points:
+- "shipping features while also fundraising means something always gets dropped"
+- "every traffic spike becomes an all-hands emergency because there's no time for proper architecture"
+- "compliance keeps blocking releases while competitors ship weekly"
+
+EXAMPLES of BAD pain points (too generic):
+- "scaling is hard"
+- "you need more engineers"
+- "technical debt is growing"
+
+Return ONLY the pain point statement, nothing else."""
+
+    try:
+        rate_limiter = get_rate_limiter()
+        available_model = rate_limiter.get_best_available_model()
+        
+        if not available_model:
+            # Fallback to a sensible default
+            return "your best engineers are stuck maintaining instead of building the next thing"
+        
+        client, _, provider = get_llm_client('groq', available_model)
+        
+        response = client.chat.completions.create(
+            model=available_model,
+            messages=[
+                {"role": "system", "content": "You write specific, relatable pain points for cold emails. Be concise and insightful."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=100
+        )
+        
+        rate_limiter.record_request(available_model, response.usage.total_tokens if response.usage else 100)
+        
+        pain_point = response.choices[0].message.content.strip()
+        # Clean up any quotes or extra formatting
+        pain_point = pain_point.strip('"\'')
+        
+        return pain_point
+        
+    except Exception as e:
+        logger.warning(f"AI pain point generation failed: {e}, using fallback")
+        return "your best engineers are stuck maintaining instead of building the next thing"
 
 
 def get_llm_client(provider: str = None, model: str = None):
@@ -355,49 +477,82 @@ class EmailGenerator:
         # Show initialization message with available Groq capacity
         if self.provider == 'groq':
             stats = self.rate_limiter.get_usage_stats()
-            primary_stats = stats.get(self.model, {})
-            print(f"📝 Email generator using: GROQ ({self.model})")
-            print(f"   Daily capacity: {primary_stats.get('daily_remaining', '?')}/{primary_stats.get('daily_limit', '?')} remaining")
-            print(f"   Fallback chain: {' → '.join(GROQ_FALLBACK_CHAIN)}")
+            print(f"📝 Email generator using: GROQ (aggressive fallback enabled)")
+            print(f"   Model capacity (tokens used / limit):")
+            for model in GROQ_FALLBACK_CHAIN:
+                s = stats.get(model, {})
+                used = s.get('tokens_used', 0)
+                limit = s.get('tokens_limit', 100000)
+                pct = s.get('percent_used', 0)
+                status = "✅" if pct < 80 else "⚠️" if pct < 95 else "❌"
+                print(f"      {status} {model}: {used:,}/{limit:,} ({pct}%)")
         else:
             print(f"📝 Email generator using: {self.provider.upper()} ({self.model})")
     
     def _call_llm(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, json_mode: bool = False) -> str:
         """
         Call the LLM (Groq or OpenAI) with rate limiting and automatic Groq model fallback.
+        AGGRESSIVE: Automatically tries next model in chain when one hits rate limits.
         Returns the response content as string.
         """
         # For OpenAI, just make the call directly
         if self.provider != 'groq':
             return self._make_llm_call(self.client, self.model, system_prompt, user_prompt, temperature, json_mode)
         
-        # For Groq, use the fallback chain
-        preferred_model = self.model
+        # For Groq, use aggressive fallback - try each model in chain until one works
+        tried_models = set()
+        last_error = None
         
-        # Find an available model from the fallback chain
-        available_model = self.rate_limiter.get_best_available_model(preferred_model)
-        
-        if available_model is None:
-            # All Groq models exhausted - fall back to OpenAI if available
-            if getattr(config, 'OPENAI_API_KEY', None):
-                print(f"   ⚠️ All Groq models exhausted, falling back to OpenAI")
-                from openai import OpenAI
-                openai_client = OpenAI(api_key=config.OPENAI_API_KEY)
-                openai_model = getattr(config, 'OPENAI_MODEL', 'gpt-4.1-mini')
-                return self._make_llm_call(openai_client, openai_model, system_prompt, user_prompt, temperature, json_mode)
-            else:
-                raise Exception("All Groq models rate limited and no OpenAI fallback configured")
-        
-        # Log if we're using a different model than preferred
-        if available_model != preferred_model:
-            logger.info(f"Using fallback model: {available_model} (primary {preferred_model} rate limited)")
-        
-        # Get client for the available model (all Groq models use same client)
-        return self._make_llm_call(self.client, available_model, system_prompt, user_prompt, temperature, json_mode, record_usage=True)
+        while True:
+            # Find an available model from the fallback chain (excluding already tried)
+            available_model = self.rate_limiter.get_best_available_model(self.model)
+            
+            # Skip models we've already tried this call
+            if available_model in tried_models:
+                # Find any model we haven't tried yet
+                for model in GROQ_FALLBACK_CHAIN:
+                    if model not in tried_models:
+                        available_model = model
+                        break
+                else:
+                    available_model = None
+            
+            if available_model is None:
+                # All Groq models exhausted - fall back to OpenAI if available
+                if getattr(config, 'OPENAI_API_KEY', None):
+                    print(f"   ⚠️ All Groq models exhausted, falling back to OpenAI")
+                    from openai import OpenAI
+                    openai_client = OpenAI(api_key=config.OPENAI_API_KEY)
+                    openai_model = getattr(config, 'OPENAI_MODEL', 'gpt-4.1-mini')
+                    return self._make_llm_call(openai_client, openai_model, system_prompt, user_prompt, temperature, json_mode)
+                else:
+                    raise last_error or Exception("All Groq models rate limited and no OpenAI fallback configured")
+            
+            tried_models.add(available_model)
+            
+            try:
+                # Try this model
+                return self._make_llm_call(self.client, available_model, system_prompt, user_prompt, temperature, json_mode, record_usage=True)
+            except Exception as e:
+                error_str = str(e).lower()
+                last_error = e
+                
+                # If it's a rate limit error, mark this model as exhausted and try next
+                if 'rate' in error_str and 'limit' in error_str:
+                    # Mark this model as at capacity for today
+                    data = self.rate_limiter._get_cache(available_model)
+                    limits = GROQ_MODEL_LIMITS.get(available_model, {})
+                    data['tokens_used'] = limits.get('tokens_per_day', 100000)  # Max out the token count
+                    self.rate_limiter._save_to_db(available_model, data)
+                    print(f"   ⚠️ {available_model} hit rate limit, trying next model...")
+                    continue
+                else:
+                    # Non-rate-limit error, raise it
+                    raise
     
     def _make_llm_call(self, client, model: str, system_prompt: str, user_prompt: str, 
                        temperature: float, json_mode: bool, record_usage: bool = False) -> str:
-        """Make the actual LLM API call with retry logic"""
+        """Make the actual LLM API call - raises exception on failure for fallback handling"""
         kwargs = {
             "model": model,
             "messages": [
@@ -411,39 +566,27 @@ class EmailGenerator:
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         
-        # Try the API call with retry logic for rate limits
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response = client.chat.completions.create(**kwargs)
-                
-                # Record successful Groq request
-                if record_usage and self.rate_limiter:
-                    self.rate_limiter.record_request(model)
-                
-                return response.choices[0].message.content
-                
-            except Exception as e:
-                error_str = str(e).lower()
-                
-                # Check if it's a rate limit error
-                if 'rate' in error_str and 'limit' in error_str:
-                    if attempt < max_retries - 1:
-                        wait_time = (attempt + 1) * 5
-                        logger.warning(f"Rate limit error, waiting {wait_time}s (attempt {attempt + 1}/{max_retries})")
-                        time.sleep(wait_time)
-                        continue
-                
-                # Not a rate limit error or final retry - raise it
-                logger.error(f"LLM call failed: {e}")
-                raise
+        # Single attempt - let _call_llm handle fallback
+        response = client.chat.completions.create(**kwargs)
         
-        raise Exception("Max retries exceeded for LLM call")
+        # Record successful Groq request with actual token usage
+        if record_usage and self.rate_limiter:
+            # Extract actual token usage from response
+            tokens_used = 2000  # Default estimate
+            if hasattr(response, 'usage') and response.usage:
+                tokens_used = getattr(response.usage, 'total_tokens', 2000)
+            self.rate_limiter.record_request(model, tokens_used)
+        
+        return response.choices[0].message.content
     
     def research_company(self, lead: Dict[str, Any]) -> Dict[str, Any]:
         """
         PROBLEM SNIFFING: Research the company to find something SPECIFIC to mention.
         This is what separates spam from real outreach.
+        
+        PRIORITY ORDER:
+        1. Use REAL enrichment data if available (from website crawl)
+        2. Fall back to LLM research (but be honest about confidence)
         
         Returns specific insights we can reference in the email.
         """
@@ -452,14 +595,45 @@ class EmailGenerator:
         industry = lead.get('industry') or ''
         first_name = lead.get('first_name') or ''
         
+        # FIRST: Check for real enrichment data from website crawl
+        try:
+            from lead_enricher import get_enrichment_for_email
+            enrichment = get_enrichment_for_email(lead)
+            
+            if enrichment.get('has_enrichment'):
+                conversation_starters = enrichment.get('conversation_starters', [])
+                what_they_do = enrichment.get('what_they_do')
+                their_space = enrichment.get('their_space')
+                pain_guess = enrichment.get('pain_point_guess')
+                
+                # Only use if we have meaningful data
+                if conversation_starters or what_they_do:
+                    print(f"   🎯 Using REAL enrichment data for {company}")
+                    return {
+                        "conversation_starters": conversation_starters,
+                        "what_they_do": what_they_do,
+                        "their_space": their_space or industry,
+                        "likely_pain_point": pain_guess or "shipping fast while maintaining quality",
+                        "company_context": enrichment.get('company_context', {}),
+                        "confidence": "high",
+                        "source": "website_enrichment"
+                    }
+        except Exception as e:
+            print(f"   ⚠️ Could not load enrichment: {e}")
+        
+        # FALLBACK: Use LLM research (but be honest about confidence)
         system_prompt = """You are researching a company to write a personalized cold email.
 Your job is to find ONE specific, interesting thing about this company that we can reference.
 
-DO NOT make things up. If you don't know something specific, say so.
+CRITICAL: DO NOT make things up. If you don't know something specific, say so.
+DO NOT pretend you "saw their latest moves" or "noticed they're hiring" without proof.
 DO NOT be generic. "Great company" or "interesting product" is useless.
 
+If you can't find something REAL and SPECIFIC, return confidence: "low"
+and we'll use an honest approach instead of faking observation.
+
 Find something SPECIFIC like:
-- A recent product launch or feature
+- A recent product launch or feature (only if you know for sure)
 - Their business model or unique approach
 - A specific problem they likely face based on their stage/industry
 - Something about their tech stack or hiring patterns
@@ -474,7 +648,7 @@ Return JSON:
     "confidence": "high/medium/low - how confident are we this is accurate"
 }
 
-If confidence is low, we'll use a different approach (honest curiosity instead of fake observation)."""
+BE HONEST. If confidence is low, we'll use a direct approach instead of fake observation."""
 
         user_prompt = f"""Research this lead:
 - Name: {first_name}
@@ -482,11 +656,13 @@ If confidence is low, we'll use a different approach (honest curiosity instead o
 - Company: {company}
 - Industry: {industry}
 
-Find something SPECIFIC we can reference. Don't make things up."""
+Find something SPECIFIC we can reference. If you don't have REAL information, say confidence: low."""
 
         try:
             content = self._call_llm(system_prompt, user_prompt, temperature=0.7, json_mode=True)
-            return json.loads(content)
+            result = json.loads(content)
+            result['source'] = 'llm_research'
+            return result
         except Exception as e:
             print(f"Error researching company: {e}")
             return {
@@ -494,87 +670,76 @@ Find something SPECIFIC we can reference. Don't make things up."""
                 "likely_pain_point": "shipping product fast with limited engineering bandwidth",
                 "why_relevant_to_us": "we help startups ship in weeks not months",
                 "conversation_hook": "curious about your engineering setup",
-                "confidence": "low"
+                "confidence": "low",
+                "source": "fallback"
             }
     
     def select_case_study(self, lead: Dict[str, Any], research: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Select the MOST RELEVANT case study for this specific lead.
-        LeadGenJay: "If the prospect is nothing like your case study, it doesn't really help"
+        Use AI to select the most relevant case study for this lead.
         
-        IMPROVED: Better industry keyword matching with comprehensive mappings
+        Instead of brittle keyword matching, let the LLM understand context
+        and pick the case study that will resonate most.
         """
-        industry = (lead.get('industry') or '').lower()
-        company = (lead.get('company') or '').lower()
-        title = (lead.get('title') or '').lower()
-        pain_point = (research.get('likely_pain_point') or '').lower()
+        company = lead.get('company') or 'Unknown'
+        title = lead.get('title') or ''
+        their_space = research.get('their_space') or lead.get('industry') or ''
+        what_they_do = research.get('what_they_do') or ''
+        pain_guess = research.get('likely_pain_point') or ''
         
-        # Industry keyword mappings for better matching
-        industry_keywords = {
-            'fintech_client': ['fintech', 'finance', 'financial', 'banking', 'payment', 'crypto', 'defi', 'trading', 'investment', 'wallet', 'money', 'capital'],
-            'healthtech_client': ['health', 'medical', 'healthcare', 'hipaa', 'patient', 'clinical', 'pharma', 'drug', 'biotech', 'hospital', 'doctor', 'med'],
-            'roboapply': ['hr', 'human resource', 'recruiting', 'hiring', 'talent', 'staffing', 'job', 'career', 'ai', 'automation', 'application'],
-            'stratmap': ['saas', 'b2b', 'startup', 'mvp', 'software', 'platform', 'seed', 'series', 'venture', 'founder'],
-            'timpl': ['enterprise', 'legacy', 'staffing', 'corporate', 'modernization', 'migration', 'deployment']
-        }
+        # Build case study summaries for the AI
+        case_study_summaries = []
+        for key, cs in self.case_studies.items():
+            # Skip aliases (roboapply, stratmap, timpl)
+            if key in ['roboapply', 'stratmap', 'timpl']:
+                continue
+            case_study_summaries.append(f"""
+- {key}:
+  Company type: {cs.get('company_hint', cs.get('company_name', 'unknown'))}
+  What we built: {cs.get('what_we_built', 'unknown')}
+  Result: {cs.get('result', 'unknown')}
+  Timeline: {cs.get('timeline', 'unknown')}
+  Best for: {', '.join(cs.get('relevance', []))}""")
         
-        # Score each case study for relevance
-        scores = {}
-        
-        for key, study in self.case_studies.items():
-            score = 0
-            relevance_tags = [r.lower() for r in (study.get('relevance') or [])]
-            study_industry = (study.get('industry') or '').lower()
-            keywords = industry_keywords.get(key, [])
+        system_prompt = """You pick the best case study for a cold email.
+
+RULES:
+1. The case study must RELATE to their business or pain point
+2. A construction tech company → enterprise/cost reduction case study (NOT SaaS MVP)
+3. An AI startup → AI/automation case study (NOT legacy modernization)
+4. A fintech → fintech or fast shipping case study
+5. If nothing matches well, pick the most UNIVERSAL one (enterprise_modernization or hr_tech_ai)
+
+Return ONLY the case study key (e.g., "enterprise_modernization"), nothing else."""
+
+        user_prompt = f"""Pick the best case study for:
+
+Company: {company}
+Their space: {their_space}
+What they do: {what_they_do}
+Their likely pain: {pain_guess}
+Contact's title: {title}
+
+CASE STUDIES:
+{chr(10).join(case_study_summaries)}
+
+Which case study key is most relevant? Return ONLY the key."""
+
+        try:
+            content = self._call_llm(system_prompt, user_prompt, temperature=0.3)
+            selected_key = content.strip().lower().replace('"', '').replace("'", "")
             
-            # Check industry field for keyword matches
-            for kw in keywords:
-                if kw in industry:
-                    score += 4  # Strong match
-                if kw in company:
-                    score += 2  # Company name hint
-            
-            # STRONG industry match (most important per LeadGenJay)
-            if study_industry and study_industry in industry:
-                score += 5
-            elif any(tag in industry for tag in relevance_tags):
-                score += 3
-            
-            # Pain point match
-            if 'ai' in pain_point and 'ai' in relevance_tags:
-                score += 2
-            if 'legacy' in pain_point and 'legacy' in relevance_tags:
-                score += 2
-            if 'mvp' in pain_point or 'ship' in pain_point:
-                if 'mvp' in relevance_tags or 'fast shipping' in relevance_tags:
-                    score += 2
-            if 'scale' in pain_point or 'scaling' in pain_point:
-                score += 1  # Generic, slight boost for any case study
-            
-            # Title match (CTOs care about different things than founders)
-            if 'cto' in title or 'engineer' in title or 'technical' in title:
-                if key == 'timpl' or key == 'fintech_client':  # Technical case studies
-                    score += 1
-            if 'ceo' in title or 'founder' in title:
-                if key == 'stratmap':  # Business outcome case study
-                    score += 2
-            
-            scores[key] = score
+            # Validate the key exists
+            if selected_key in self.case_studies:
+                result = self.case_studies[selected_key].copy()
+                result['selected_by'] = 'ai'
+                return result
+        except Exception as e:
+            print(f"   ⚠️ AI case study selection failed: {e}")
         
-        # Pick the best match, with some randomization for ties
-        best_score = max(scores.values())
-        best_matches = [k for k, v in scores.items() if v == best_score]
-        selected = random.choice(best_matches)
-        
-        # Log selection for debugging
-        if best_score < 2:
-            print(f"   ⚠️ Low case study match (score={best_score}) for industry: {industry}")
-        
-        # Add industry match flag for prompt to use
-        result = self.case_studies[selected].copy()
-        result['industry_match'] = best_score >= 3  # True if reasonably matched
-        result['match_score'] = best_score
-        
+        # Fallback to enterprise_modernization (most universal)
+        result = self.case_studies.get('enterprise_modernization', list(self.case_studies.values())[0]).copy()
+        result['selected_by'] = 'fallback'
         return result
     
     def determine_icp_and_criteria(self, campaign_description: str) -> Dict[str, Any]:
@@ -709,11 +874,136 @@ Remember:
             "campaign_context": {
                 "product_service": "senior engineering team for 8-week sprints",
                 "single_pain_point": "can't ship fast enough with current team",
-                "unique_angle": "we shipped RoboApply's entire AI system in 8 weeks",
-                "case_study": CASE_STUDIES["roboapply"],
+                "unique_angle": "we shipped an HR tech startup's AI system in 8 weeks",
+                "case_study": CASE_STUDIES.get("hr_tech_ai", CASE_STUDIES.get("roboapply", {})),
                 "front_end_offer": "free 30-min architecture review",
                 "trigger_signal": "actively building/scaling product"
             }
+        }
+    
+    def classify_lead_icp(self, lead: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Classify whether a lead is an Ideal Customer Profile (ICP) match.
+        
+        Based on TK Kader's ICP Framework:
+        - 10x better: We solve an urgent problem better than alternatives
+        - Data-backed: Classification is based on criteria, not wishlist
+        - Trackable: Returns structured data for analytics
+        
+        Returns:
+            {
+                "is_icp": True/False,
+                "icp_template": "template_name" or None,
+                "icp_score": 0.0-1.0,
+                "icp_reasons": ["reason1", "reason2", ...],
+                "non_icp_reasons": ["reason1", ...]  # If not ICP
+            }
+        """
+        title = (lead.get("title") or "").lower()
+        company = (lead.get("company") or "").lower()
+        industry = (lead.get("industry") or "").lower()
+        enrichment = lead.get("enrichment", {})
+        
+        # Initialize scoring
+        score = 0.0
+        reasons = []
+        non_icp_reasons = []
+        matched_template = None
+        
+        # === TITLE MATCH (40% weight) ===
+        # Ideal: Decision-makers who can buy and need dev help
+        decision_maker_titles = [
+            "founder", "co-founder", "ceo", "cto", "chief technology",
+            "vp engineering", "head of engineering", "vp product",
+            "head of product", "cpo", "chief product"
+        ]
+        
+        technical_titles = [
+            "cto", "chief technology", "vp engineering", "head of engineering",
+            "engineering director", "software director"
+        ]
+        
+        is_decision_maker = any(t in title for t in decision_maker_titles)
+        is_technical = any(t in title for t in technical_titles)
+        
+        if is_decision_maker:
+            score += 0.40
+            reasons.append(f"Decision-maker title: {lead.get('title')}")
+            if is_technical:
+                reasons.append("Technical decision-maker (can evaluate our work)")
+        else:
+            non_icp_reasons.append(f"Not a decision-maker title: {lead.get('title')}")
+        
+        # === COMPANY SIGNALS (30% weight) ===
+        # Look for signals that suggest they need dev help
+        
+        # Funded startup signal
+        funding_keywords = ["series a", "series b", "seed", "funded", "raised", "venture"]
+        company_lower = (company + " " + enrichment.get("company_description", "")).lower()
+        if any(kw in company_lower for kw in funding_keywords):
+            score += 0.15
+            reasons.append("Funded company (has budget for dev work)")
+        
+        # Scaling/growth signals
+        growth_keywords = ["growing", "scaling", "hiring", "expanding", "fast-growing"]
+        if any(kw in company_lower for kw in growth_keywords):
+            score += 0.15
+            reasons.append("Growth signals (likely need to ship faster)")
+        
+        # Tech company signals (our wheelhouse)
+        tech_keywords = ["software", "saas", "platform", "app", "tech", "ai", "fintech", 
+                        "healthtech", "edtech", "proptech", "automation"]
+        if any(kw in company_lower or kw in industry for kw in tech_keywords):
+            score += 0.15
+            reasons.append("Tech/software company (perfect fit for our services)")
+        else:
+            non_icp_reasons.append("Not clearly a tech/software company")
+        
+        # === ENRICHMENT SIGNALS (20% weight) ===
+        if enrichment.get("has_enrichment"):
+            # Job posting signals (they're hiring = maybe stretched thin)
+            if enrichment.get("is_hiring_engineers"):
+                score += 0.10
+                reasons.append("Currently hiring engineers (team at capacity)")
+            
+            # Tech stack signals (we work with these)
+            tech_stack = enrichment.get("tech_stack", [])
+            our_stack = ["python", "react", "node", "aws", "typescript", "javascript", 
+                        "django", "fastapi", "nextjs", "postgresql", "mongodb"]
+            matching_tech = [t for t in tech_stack if any(our in t.lower() for our in our_stack)]
+            if matching_tech:
+                score += 0.10
+                reasons.append(f"Tech stack we excel at: {', '.join(matching_tech[:3])}")
+        
+        # === PAIN POINT ALIGNMENT (10% weight) ===
+        # Match to specific ICP template
+        for template_name, template in ICP_TEMPLATES.items():
+            template_titles = [t.lower() for t in template.get("titles", [])]
+            template_industries = [i.lower() for i in template.get("industries", [])]
+            
+            title_match = any(t in title for t in template_titles)
+            industry_match = any(i in industry for i in template_industries) if industry else False
+            
+            if title_match:
+                if industry_match or not industry:  # Industry match OR industry unknown
+                    matched_template = template_name
+                    score += 0.10
+                    reasons.append(f"Matches ICP template: {template_name}")
+                    break
+        
+        # === FINAL CLASSIFICATION ===
+        # ICP if score >= 0.50 (need at least decision-maker + one other signal)
+        is_icp = score >= 0.50
+        
+        if not is_icp and not non_icp_reasons:
+            non_icp_reasons.append("Insufficient signals to classify as ICP")
+        
+        return {
+            "is_icp": is_icp,
+            "icp_template": matched_template,
+            "icp_score": round(score, 2),
+            "icp_reasons": reasons,
+            "non_icp_reasons": non_icp_reasons
         }
     
     def generate_initial_email(self, 
@@ -759,17 +1049,35 @@ Remember:
         title = lead.get('title') or ''
         industry = lead.get('industry') or ''
         
+        # Build personalization context from enrichment
+        has_real_data = research.get('source') == 'website_enrichment'
+        conversation_starters = research.get('conversation_starters', [])
+        what_they_do = research.get('what_they_do', '')
+        their_space = research.get('their_space', industry)
+        pain_guess = research.get('likely_pain_point', '')
+        
         # Determine opening strategy based on research confidence
-        if research.get('confidence') == 'high':
-            opening_instruction = f"""Use this SPECIFIC observation: "{research.get('specific_observation')}"
-Reference it naturally like you're texting a friend - NOT "I noticed" or "I saw"."""
+        if research.get('confidence') == 'high' and has_real_data:
+            # We have REAL data from their website
+            starters_text = "\\n".join([f"  - \"{s}\"" for s in conversation_starters[:2]]) if conversation_starters else "none"
+            opening_instruction = f"""**USE THIS REAL DATA FROM THEIR WEBSITE:**
+What they do: {what_they_do or 'unknown'}
+Their space: {their_space or 'unknown'}
+Likely pain point: {pain_guess or 'shipping fast'}
+
+**SUGGESTED CONVERSATION STARTERS (use one or adapt):**
+{starters_text}
+
+Pick a starter that sounds curious, not creepy. Then connect it to their likely pain point."""
         elif research.get('confidence') == 'medium':
-            opening_instruction = f"""Use this hook: "{research.get('conversation_hook')}"
+            opening_instruction = f"""Use this hook: "{research.get('conversation_hook', '')}"
 Be casual and direct - like texting a colleague, not writing a formal email."""
         else:
-            opening_instruction = f"""Be direct and honest - don't pretend you researched if you didn't:
-- "{company}'s in an interesting space" or ask a genuine question
-- Just get to the point quickly"""
+            opening_instruction = f"""Be direct and honest - no fake observations:
+- "{company} caught my eye" or "{company} is doing interesting stuff in [their space]"
+- Ask a genuine question about challenges in their industry
+- Just get to the point quickly
+DO NOT fake observations like "saw you're hiring" or "noticed your growth"."""
         
         # VARIED SUBJECT LINES - LeadGenJay: 2-3 words that a colleague could send
         # NEVER just "{name}?" - it's overused and boring
@@ -816,91 +1124,114 @@ Be casual and direct - like texting a colleague, not writing a formal email."""
         ]
         suggested_cta = random.choice(cta_options)
         
-        # Case study reference - LeadGenJay: use relevant case studies with REAL company hints
-        # "a HR Tech company" is weak - add specificity when possible
-        industry_hint = case_study.get('industry', 'similar')
-        if case_study.get('industry_match'):
-            case_study_reference = f"a {industry_hint} company like yours"
-        else:
-            case_study_reference = f"a {industry_hint} company we worked with"
+        # Case study reference - use company_hint for natural phrasing
+        # e.g., "an enterprise company" instead of "Enterprise / Staffing"
+        company_hint = case_study.get('company_hint') or case_study.get('company_name') or 'a similar company'
+        case_study_reference = company_hint
         
-        # LeadGenJay's EXACT framework from the 90-page doc:
-        # Line 1: Preview text that sounds like a friend (NOT why you're reaching out)
-        # Line 2: Poke the bear / agitate pain with observation, NOT question
-        # Line 3: Case study with SPECIFIC numbers (3.72x not 4x)
-        # Line 4: Soft CTA
+        # =================================================================
+        # LEADGENJAY'S FRAMEWORK (from 90-page doc + his actual emails)
+        # =================================================================
+        # His CORE insight: "I consider that first sentence the preview text.
+        # You don't want them to think you're being pitched before they open."
+        #
+        # Line 1 = PREVIEW TEXT - sounds like friend texting
+        # Line 2 = POKE THE BEAR - ask a QUESTION about how they do things
+        # Line 3 = CASE STUDY - must match the pain, specific numbers
+        # Line 4 = SOFT CTA - "thoughts?" "worth a chat?"
+        # =================================================================
         
-        system_prompt = f"""You are writing a cold email following LeadGenJay's $15M framework.
+        system_prompt = f"""You are LeadGenJay writing a cold email.
 
-**YOUR EMAIL MUST PASS THESE CHECKS OR IT FAILS:**
-✅ Company name "{company}" appears in the body
-✅ Exactly 4 lines (hook, pain, case study, CTA)
-✅ Ends with soft CTA: "thoughts?", "make sense?", "worth a chat?"
-✅ Under 75 words
-✅ NO em dashes (—), NO AI words
+You've sent thousands of these. You know what works.
 
-**EXACT 4-LINE STRUCTURE (copy this format):**
-```
-Line 1: [curiosity hook]. {company} [observation about their pain].
-Line 2: [State the pain in one sentence - don't ask about it].
-Line 3: a [industry] company [result] in [timeline].
-Line 4: [soft CTA]?
-```
+**YOUR PHILOSOPHY:**
+- The first line is PREVIEW TEXT. They see it before opening. If it looks like a pitch, they delete without opening.
+- You write like you're texting a friend, not writing a business email.
+- You NEVER say "most teams struggle with X" - that's lazy templated garbage.
+- You poke the bear by asking a QUESTION about how they handle something specific.
+- The whole email flows like ONE conversation, not 4 disconnected lines.
 
-**PASSING EXAMPLE (copy this style):**
-Subject: quick q
+**YOUR 4-LINE STRUCTURE:**
 
-random thought. {company}'s compliance rules must be a headache lately.
-scaling while keeping quality tight feels impossible.
-a FinTech firm boosted throughput 2.7x with zero downtime in 10 weeks.
-thoughts?
+LINE 1 - THE PREVIEW TEXT:
+This shows in inbox before they open. Sound like a friend texting.
+GOOD: "hey {first_name.lower()}, random q" / "quick one for you" / "this might be off base"
+BAD: "{company}'s growth caught my eye" / "saw you're doing X" (reveals pitch = instant delete)
 
-**ANOTHER PASSING EXAMPLE:**
-Subject: odd thought
+LINE 2 - POKE THE BEAR:
+Ask a QUESTION about a UNIVERSAL pain (speed, cost, manual work, hiring) that ANY business faces.
+Make it feel relevant to their world without being too niche.
+GOOD: "are you guys still doing [process] manually or did you automate that?"
+GOOD: "is your team stuck maintaining stuff instead of building new features?"
+GOOD: "how are you handling dev capacity while also [growing/fundraising/scaling]?"
+BAD: "Managing compliance is getting harder" (statement, not question)
+BAD: "most teams struggle with..." (lazy, everyone says this)
 
-quick q for you. {company} scaling fast right now?
-shipping speed usually tanks when teams grow.
-a SaaS company cut bug rates by 43% in 8 weeks.
-make sense?
+LINE 3 - CASE STUDY:
+**CRITICAL: USE THE EXACT CASE STUDY I GIVE YOU. DO NOT CHANGE THE COMPANY TYPE.**
+If I say "helped a healthtech startup" - say EXACTLY that, even if the prospect is in pet tech.
+The case study is REAL. Changing it is LYING. Never fabricate.
+Frame it around a UNIVERSAL outcome (speed, cost savings, faster shipping) that resonates with anyone.
 
-**SUBJECT LINE (2-4 words):**
-Good: "random thought", "quick q", "odd thought", "{suggested_subject}"
-Bad: "{first_name}?", "Quick Question", "Partnership"
+LINE 4 - SOFT CTA:
+"thoughts?" / "worth a quick chat?" / "am I way off here?"
 
-**FIRST LINE STARTERS (pick one):**
-- "random thought. {company}..."
-- "quick q for you. {company}..."
-- "odd thought. {company}..."
-- "this might be weird but {company}..."
-
-**BANNED (instant fail):**
-❌ Em dash (—) anywhere
-❌ "I noticed", "I saw", "I came across"
-❌ "how is {company} handling..."
-❌ AI words: delve, leverage, utilize, robust, seamless, foster, harness
-
-**USE:**
-✅ Contractions (don't, can't, isn't)
-✅ Choppy sentences. Short. Punchy.
-✅ Simple words (6th grade level)
+**RULES:**
+- Subject: 2-3 lowercase words ("quick q" / "random thought")
+- Body: 35-50 words TOTAL
+- 4 short paragraphs, blank lines between
+- NO em dashes (—), NO corporate jargon (no "streamline", "leverage", "optimize")
+- Contractions always (don't, can't, won't)
+- 6th grade reading level
+- NEVER change or fabricate the case study company type
 {improvement_prompt if improvement_prompt else ""}
 
-Return JSON: {{"subject": "...", "body": "..."}}"""
+Return JSON: {{"subject": "...", "body": "line1\\n\\nline2\\n\\nline3\\n\\nline4"}}"""
 
-        user_prompt = f"""Write cold email to:
-- Name: {first_name}
-- Company: {company} (MUST appear in body)
-- Title: {title}
-- Industry: {industry}
+        # Build enrichment context for AI pain point generation
+        enrichment_context = {
+            'what_they_do': what_they_do,
+            'their_space': their_space,
+            'pain_point_guess': pain_guess
+        } if has_real_data else None
+        
+        # Get AI-generated pain point based on context
+        industry_pain_point = get_industry_pain_point(industry, title, enrichment_context)
+        
+        # Use enrichment pain point if available, otherwise use AI-generated one
+        actual_pain_point = pain_guess if (has_real_data and pain_guess) else industry_pain_point
+        
+        user_prompt = f"""Write a LeadGenJay-style cold email.
 
-Case study: {case_study_reference} - {case_study.get('result')} in {case_study.get('timeline')}
+TO: {first_name} at {company} ({title})
+INDUSTRY: {their_space or industry or "tech"}
 
-MANDATORY CHECKLIST (verify before responding):
-☐ "{company}" appears in line 1
-☐ Exactly 4 lines
-☐ Ends with "thoughts?" or "make sense?" or "worth a chat?"
-☐ NO em dash (—)
-☐ Under 75 words"""
+ASK A QUESTION ABOUT ONE OF THESE UNIVERSAL PAINS:
+- Manual processes that should be automated
+- Dev team stretched thin / can't hire fast enough  
+- Shipping too slow / roadmap slipping
+- Tech debt vs new features tradeoff
+
+Pick whichever feels natural for a {title}.
+
+**CASE STUDY - USE WORD FOR WORD:**
+"{case_study_reference}" achieved "{case_study.get('result_short', case_study.get('result'))}" in "{case_study.get('timeline')}"
+
+⚠️ HONESTY CHECK: The prospect is in {their_space or industry or 'tech'}. Your case study is about "{case_study_reference}".
+These may not match - THAT'S OK. Use "{case_study_reference}" exactly as written. Do NOT change it to "{their_space or industry or 'tech'}". Lying destroys trust.
+
+**WRITE 4 LINES:**
+
+1. Preview text (friend): "hey {first_name.lower()}, quick one." or "random q for you."
+
+2. Question (universal pain): "are you guys still [doing X manually]?" or "is your team stuck [maintaining vs building]?"
+
+3. Case study (VERBATIM): "helped {case_study_reference} {case_study.get('result_short', 'ship faster')} in {case_study.get('timeline', '8 weeks')}."
+
+4. Soft CTA: "thoughts?"
+
+Return JSON only."""
 
         try:
             content = self._call_llm(system_prompt, user_prompt, temperature=0.9, json_mode=True)
@@ -915,6 +1246,35 @@ MANDATORY CHECKLIST (verify before responding):
                 print(f"   ⚠️ LLM returned empty body, using fallback")
                 return self._fallback_email(lead, campaign_context, research, case_study, suggested_cta)
             
+            # CRITICAL: Check for HALLUCINATED case studies
+            # If AI changed the case study company type, use fallback
+            body_lower = body.lower()
+            expected_cs = case_study_reference.lower()
+            
+            # List of hallucination patterns - AI changing case study to match prospect industry
+            hallucination_indicators = [
+                f"{industry.lower()} company" if industry else None,
+                f"{industry.lower()} startup" if industry else None,
+                f"{industry.lower()} team" if industry else None,
+                "pet tech", "legal tech", "legaltech", "edtech", "foodtech", "food tech",
+                "logistics company", "sustainability", "beverage tech",
+            ]
+            hallucination_indicators = [h for h in hallucination_indicators if h]
+            
+            # Check if AI hallucinated a case study
+            has_hallucination = any(h in body_lower for h in hallucination_indicators if h not in expected_cs)
+            has_real_case_study = expected_cs in body_lower or any(
+                variant.lower() in body_lower 
+                for variant in [
+                    case_study.get('company_name', ''),
+                    case_study.get('company_hint', ''),
+                ]
+            )
+            
+            if has_hallucination and not has_real_case_study:
+                print(f"   ⚠️ AI hallucinated case study (expected '{case_study_reference}'), using fallback...")
+                return self._fallback_email(lead, campaign_context, research, case_study, suggested_cta)
+            
             # CRITICAL: Check if email starts with company observation (instant delete pattern)
             first_line = body.split('\n')[0].lower().strip() if body else ""
             company_lower = company.lower() if company else ""
@@ -927,10 +1287,18 @@ MANDATORY CHECKLIST (verify before responding):
                 "i noticed",
                 "i saw",
                 "i came across",
+                "i've been following",
+                "i've been watching",
+                "been following",
+                "been watching",
             ]
             
             # Check for bad patterns
             starts_bad = any(first_line.startswith(p) for p in bad_start_patterns if p)
+            
+            # Check for formal/long subjects (should be 2-3 words)
+            subject_words = len(subject.split())
+            subject_is_formal = subject_words > 4 or any(w in subject.lower() for w in ['thoughts on', 'regarding', 'about your', 'question about'])
             
             # Also check for subject being just "Name?"
             subject_is_weak = subject.strip().lower() in [
@@ -939,16 +1307,13 @@ MANDATORY CHECKLIST (verify before responding):
                 first_name.lower(),
             ]
             
-            if starts_bad or subject_is_weak:
-                if starts_bad:
-                    print(f"   ⚠️ Email starts with company observation, regenerating...")
-                if subject_is_weak:
-                    print(f"   ⚠️ Subject is weak '{subject}', using suggested: {suggested_subject}")
-                    subject = suggested_subject
-                
-                # Try to regenerate with stricter prompt (one retry)
-                if starts_bad:
-                    return self._fallback_email(lead, campaign_context, research, case_study, suggested_cta)
+            if subject_is_formal or subject_is_weak:
+                print(f"   ⚠️ Subject '{subject}' is too formal/weak, using: {suggested_subject}")
+                subject = suggested_subject
+            
+            if starts_bad:
+                print(f"   ⚠️ Email starts with stalker pattern, using fallback...")
+                return self._fallback_email(lead, campaign_context, research, case_study, suggested_cta)
             
             # Final validation for other issues
             body = self._validate_and_clean(body, lead, case_study)
@@ -996,17 +1361,47 @@ MANDATORY CHECKLIST (verify before responding):
             "how are you managing",    # Too formal
             "how are you handling",    # Too formal
             "how's that affecting",    # Too formal
+            # NEW: Lazy generic phrases
+            "scaling is hard",
+            "scaling is tough",
+            "growth is hard",
+            "growth is tough",
+            "must be tough",
+            "must hurt",
+            "must be a pain",
+            "must be a headache",
+            "must be challenging",
+            "funding is a challenge",
+        ]
+        
+        # NEW: Lazy templated patterns to check
+        lazy_patterns = [
+            r"^(random|odd|quick)\s+(thought|q)\.\s+\w+\s+scaling\s+fast",
+            r"^(random|odd|quick)\s+(thought|q)\.\s+\w+('s)?\s+growth\s+(is\s+)?(fast|tough|hard)",
+            r"\bscaling fast\.\s*(scaling|growth)\s+is\s+(hard|tough)",
         ]
         
         # Check for double CTAs (desperate look)
         cta_phrases = ["worth a chat", "worth a quick chat", "interested", "make sense", "open to", "curious if"]
         
         body_lower = body.lower()
+        first_line = body.split('\n')[0].lower() if body else ""
         issues = []
         
         for phrase in banned_phrases:
             if phrase in body_lower:
                 issues.append(f"Contains banned phrase: '{phrase}'")
+        
+        # NEW: Check for lazy templated patterns
+        for pattern in lazy_patterns:
+            if re.search(pattern, first_line):
+                issues.append(f"Lazy templated opener detected: '{first_line[:50]}...'")
+                break
+        
+        # NEW: Check minimum word count
+        word_count = len(body.split())
+        if word_count < 25:
+            issues.append(f"Email too short ({word_count} words) - feels robotic")
         
         # Count CTAs
         cta_count = sum(1 for cta in cta_phrases if cta in body_lower)
@@ -1014,16 +1409,15 @@ MANDATORY CHECKLIST (verify before responding):
             issues.append(f"Multiple CTAs detected ({cta_count}) - looks desperate")
         
         # Check first line for robotic patterns
-        first_line = body.split('\n')[0].lower() if body else ""
         if first_line.startswith("i noticed") or first_line.startswith("i saw"):
             issues.append("Opens with robotic 'I noticed/saw' pattern")
         
         # Check sentence lengths
         sentences = [s.strip() for s in body.replace('\n', '. ').split('.') if s.strip()]
         for s in sentences:
-            word_count = len(s.split())
-            if word_count > 15:
-                issues.append(f"Long sentence ({word_count} words): '{s[:40]}...'")
+            s_word_count = len(s.split())
+            if s_word_count > 15:
+                issues.append(f"Long sentence ({s_word_count} words): '{s[:40]}...'")
         
         # Log warnings
         for issue in issues:
@@ -1035,37 +1429,121 @@ MANDATORY CHECKLIST (verify before responding):
         """
         Fallback email that sounds human, not templated.
         Uses LeadGenJay structure: curiosity hook → pain → case study → soft CTA
+        
+        CRITICAL: Must include company name and feel personalized even in fallback.
+        Uses research data when available for better personalization.
         NO EM DASHES - use commas/periods instead
+        NO lazy phrases like "scaling is hard" or "[Company] scaling fast"
         """
         first_name = lead.get('first_name') or 'there'
         company = lead.get('company') or 'your company'
+        industry = lead.get('industry') or ''
+        title = lead.get('title') or ''
+        
+        # Get research-based data if available
+        likely_pain = research.get('likely_pain_point', '') if research else ''
+        their_space = research.get('their_space', industry) if research else industry
+        what_they_do = research.get('what_they_do', '') if research else ''
         
         # Varied subject lines (NEVER just "name?")
         subjects = [
             "random thought",
             "quick idea",
             "hey quick q",
-            f"{first_name.lower()} - quick q",
+            f"{company.split()[0].lower()} question" if company else "quick thought",
             "saw something",
+            "quick q",
         ]
         
-        # Curiosity-first openers (NOT company observations, NO EM DASHES)
-        openers = [
-            f"random question. how's your team handling eng bandwidth these days?",
-            f"quick thought for you {first_name}.",
-            f"been thinking about this lately.",
-            f"quick q, how are things going with scaling the technical side?",
-            f"curious about something.",
-            f"hey {first_name}, random one.",
+        # PERSONALIZED openers - LeadGenJay: Line 1 = preview text, should NOT reveal pitch
+        # These should sound like they could be from a friend/colleague
+        company_openers = [
+            f"quick one for you.",
+            f"had a thought about {company}.",
+            f"random q about the eng setup.",
+            f"this might be off base but...",
+            f"quick thought on something.",
         ]
         
-        # Pain statements (observations, not questions)
-        pains = [
-            "scaling eng teams while shipping fast is brutal.",
-            "most teams we talk to are stretched thin right now.",
-            "shipping fast without breaking things is tough.",
-            "finding senior devs who can hit the ground running is hard.",
-        ]
+        # Use AI-generated pain point if available, otherwise use contextual fallbacks
+        # LeadGenJay: Poke the bear with OBSERVATION, not "most teams struggle with X"
+        if likely_pain and len(likely_pain) > 10:
+            # Clean up the AI pain point to sound conversational
+            pain = likely_pain.lower().strip()
+            
+            # Remove any personal references like "for mike" "for tom"
+            import re
+            pain = re.sub(r'\bfor\s+\w+\b', '', pain)
+            pain = re.sub(r'\b(his|her|their)\s+team\b', 'teams', pain)
+            
+            # If pain point is too long (>15 words), use industry-specific fallback
+            if len(pain.split()) > 15:
+                if 'health' in industry.lower() or 'medical' in industry.lower():
+                    pains = ["HIPAA compliance turns every 2-week feature into a 3-month project."]
+                elif 'fintech' in industry.lower() or 'finance' in industry.lower():
+                    pains = ["compliance keeps blocking releases while competitors ship weekly."]
+                elif 'construction' in industry.lower():
+                    pains = ["coordinating sites while building product means something always drops."]
+                else:
+                    pains = ["shipping features while fundraising usually means something drops."]
+            else:
+                if not pain.endswith('.'):
+                    pain = pain + '.'
+                pains = [pain]
+        # LEADGENJAY STYLE: Poke the bear with a QUESTION, not a statement
+        # The question should make them think, then the case study answers it
+        elif 'health' in industry.lower() or 'medical' in industry.lower():
+            pains = [
+                "are you guys still doing manual HIPAA audits or did you automate that?",
+                "how's the team handling compliance while also shipping fast?",
+                "curious - do compliance reviews still take weeks on your end?",
+            ]
+        elif 'fintech' in industry.lower() or 'finance' in industry.lower():
+            pains = [
+                "how are you handling SOC2 stuff while also building product?",
+                "are compliance audits still eating into your feature time?",
+                "curious if PCI compliance is slowing down releases there too.",
+            ]
+        elif 'construction' in industry.lower() or 'infrastructure' in industry.lower():
+            pains = [
+                "how's the team syncing data across job sites right now?",
+                "are site inspections still bottlenecking your project timelines?",
+                "curious how you're handling field data while also building product.",
+            ]
+        elif 'cto' in title.lower() or 'engineer' in title.lower() or 'technical' in title.lower():
+            pains = [
+                "is your best talent stuck maintaining legacy stuff or actually building?",
+                "how are you balancing tech debt vs new features these days?",
+                "curious if you're still fighting fires or finally ahead of them.",
+            ]
+        else:
+            pains = [
+                "how are you handling dev capacity while also fundraising?",
+                "is hiring senior devs taking forever there too?",
+                "curious how you're keeping velocity up with a lean team.",
+            ]
+        
+        # VARIED case study presentations
+        cs_result = case_study.get('result_short', '3x faster shipping') if case_study else '3x faster shipping'
+        cs_timeline = case_study.get('timeline', '8 weeks') if case_study else '8 weeks'
+        cs_company_hint = case_study.get('company_hint', 'a startup') if case_study else 'a startup'
+        
+        # Check if timeline is already in the result to avoid duplication like "8 weeks in 8 weeks"
+        timeline_in_result = cs_timeline.lower() in cs_result.lower() or 'weeks' in cs_result.lower() or 'months' in cs_result.lower()
+        
+        # Use company_hint for natural phrasing, avoid raw industry strings
+        if timeline_in_result:
+            case_study_lines = [
+                f"we helped {cs_company_hint} hit {cs_result}.",
+                f"worked with {cs_company_hint} recently, hit {cs_result}.",
+                f"{cs_company_hint} we know was in the same spot, now at {cs_result}.",
+            ]
+        else:
+            case_study_lines = [
+                f"we helped {cs_company_hint} hit {cs_result} in {cs_timeline}.",
+                f"worked with {cs_company_hint} recently, they went from stuck to {cs_result} in {cs_timeline}.",
+                f"{cs_company_hint} we know was in the same spot, now they're at {cs_result} ({cs_timeline} later).",
+            ]
         
         # Use provided CTA or pick one
         ctas = cta or random.choice([
@@ -1073,21 +1551,21 @@ MANDATORY CHECKLIST (verify before responding):
             "ring any bells?",
             "sound familiar?",
             "crazy or worth exploring?",
+            "any of this hit home?",
+            "make sense for you?",
         ])
         
-        # Get case study info
-        cs_industry = case_study.get('industry', 'similar') if case_study else 'similar'
-        cs_result = case_study.get('result_short', '3x faster shipping') if case_study else '3x faster shipping'
-        cs_timeline = case_study.get('timeline', '8 weeks') if case_study else '8 weeks'
-        
         subject = random.choice(subjects)
-        opener = random.choice(openers)
+        opener = random.choice(company_openers)
         pain = random.choice(pains)
+        case_study_line = random.choice(case_study_lines)
         
-        # Build email following LeadGenJay structure
+        # Build email following LeadGenJay structure with proper newlines
         body = f"""{opener}
 
-{pain} a {cs_industry} company we worked with hit {cs_result} in {cs_timeline}.
+{pain}
+
+{case_study_line}
 
 {ctas}"""
 
@@ -1123,62 +1601,86 @@ MANDATORY CHECKLIST (verify before responding):
         Follow-up #2: Same thread, ADD GENUINE VALUE
         
         LeadGenJay: "Don't say 'just following up'. Add something useful."
+        "Email 2 is in the same thread as Email 1"
         """
         first_name = lead.get('first_name') or 'there'
         company = lead.get('company') or ''
         original_subject = previous[0]['subject'] if previous else "previous"
         
-        system_prompt = """Write follow-up #2 for a cold email that got no reply.
+        system_prompt = """You are LeadGenJay writing follow-up #2.
 
-RULES:
+They didn't reply to your first email. That's fine - they're busy.
+
+**LEADGENJAY'S FOLLOW-UP RULES:**
 - Same thread (Re: original subject)
-- UNDER 40 WORDS
-- Add GENUINE value - share an insight, resource, or quick tip
-- NEVER say "just following up", "circling back", "bumping this"
-- NEVER guilt trip
-- Sound helpful, not desperate
+- UNDER 30 WORDS - even shorter than email 1
+- Add GENUINE value - share an insight, a specific tip, or offer something
+- NEVER say "just following up", "circling back", "bumping this", "checking in"
+- NEVER guilt trip or sound desperate
+- Sound like a friend who thought of something helpful
 
-GOOD approaches:
-- "one thing I forgot - [specific insight]"
-- "fwiw - just published something on [relevant topic]. happy to share."
-- Share a specific tip related to their pain point
+**GOOD FOLLOW-UP PATTERNS:**
+- "one thing I forgot - [specific insight related to their pain]"
+- "fwiw - [quick tip or resource]. happy to share more."
+- "forgot to mention - [something valuable]"
+
+**BAD PATTERNS (NEVER USE):**
+- "just following up on my last email"
+- "wanted to circle back"
+- "bumping this to the top of your inbox"
+- "did you get a chance to read my email?"
+- "I hope this email finds you well"
+- "per my last email"
+
+Write like you're texting a friend who you thought of something useful for.
+ALL LOWERCASE. No capital letters except proper nouns.
 
 Return JSON: {"subject": "Re: [original]", "body": "..."}"""
 
         user_prompt = f"""Follow up with {first_name} at {company}.
 Original subject: {original_subject}
-Original body: {previous[0].get('body', '')[:150] if previous else ''}
 
-Write a SHORT follow-up that adds value. Under 40 words."""
+Write a SHORT follow-up (under 30 words) that adds value.
+Don't repeat what you said before - add something NEW and helpful.
+
+Example format:
+one thing I forgot -
+
+we actually documented how we did the 3.2x deploy speedup. might be useful for your team.
+
+want me to send it over?"""
 
         try:
             content = self._call_llm(system_prompt, user_prompt, temperature=0.85, json_mode=True)
             result = json.loads(content)
             body = result.get("body") or ""
             if not body.strip():
-                # Use fallback if empty
+                # LeadGenJay-style fallback
                 return {
                     "subject": f"Re: {original_subject}",
-                    "body": f"""one thing I forgot to mention - 
+                    "body": f"""one thing I forgot -
 
-we just wrote up how we cut deployment time by 3x for a company similar to {company}.
+we documented how we hit those deploy numbers. might be useful for {company}.
 
-might be relevant. happy to share if useful."""
+want me to send it over?"""
                 }
+            
+            # Humanize
+            body = humanize_email(body)
+            
             return {
                 "subject": f"Re: {original_subject}",
                 "body": body
             }
         except Exception as e:
             print(f"Error generating follow-up: {e}")
-            # Fallback
             return {
                 "subject": f"Re: {original_subject}",
-                "body": f"""one thing I forgot to mention - 
+                "body": f"""one thing I forgot -
 
-we just wrote up how we cut deployment time by 3x for a company similar to {company}.
+we documented how we hit those deploy numbers. might be useful for {company}.
 
-might be relevant. happy to share if useful."""
+want me to send it over?"""
             }
     
     def _generate_followup_new_thread(self, lead: Dict, context: Dict, previous: List) -> Dict:
@@ -1186,22 +1688,42 @@ might be relevant. happy to share if useful."""
         Follow-up #3: NEW thread, completely different angle
         
         LeadGenJay: "Email 3 should be a fresh start with different subject and angle"
+        "Give away something valuable for free - the front-end offer"
         """
         first_name = lead.get('first_name') or 'there'
         company = lead.get('company') or ''
         front_end_offer = context.get('front_end_offer') or 'free architecture review'
         
-        system_prompt = """Write follow-up #3 - a FRESH email with NEW thread.
+        system_prompt = """You are LeadGenJay writing follow-up #3 - a FRESH email.
 
-RULES:
-- NEW subject line (different from previous emails)
-- Different angle than before
-- Offer something valuable for free (the front-end offer)
-- Under 50 words
-- Don't reference previous emails
-- Sound like a fresh, helpful message
+They didn't reply to emails 1 or 2. No worries. This is a completely fresh start.
 
-IMPORTANT: Do NOT include signature or sign-off. End with the question.
+**LEADGENJAY'S EMAIL 3 RULES:**
+- NEW subject line - something like "different thought" or "quick idea"
+- Different angle than before - offer your FRONT-END OFFER (free value)
+- Don't reference previous emails AT ALL
+- Under 40 words
+- End with a soft question
+
+**FRONT-END OFFER CONCEPT (LeadGenJay):**
+"Give away something valuable for free. If someone raises their hand for the free thing,
+you have a warm lead. The free thing should take 15-30 mins of your time and showcase
+your expertise."
+
+Examples of front-end offers:
+- Free architecture review
+- Free technical audit
+- Free 30-min strategy session
+- Free code review
+- Free deployment assessment
+
+**FORMAT:**
+Line 1: their name + dash
+Line 2-3: the offer (specific, valuable, no pitch)
+Line 4: soft CTA question
+
+ALL LOWERCASE. No capital letters except proper nouns.
+DO NOT include signature or sign-off. End with the question.
 
 Return JSON: {"subject": "...", "body": "..."}"""
 
@@ -1211,7 +1733,16 @@ Return JSON: {"subject": "...", "body": "..."}"""
 Previous subjects used (DON'T repeat): {previous_subjects}
 Front-end offer to make: {front_end_offer}
 
-Write a fresh email with different approach. Under 50 words."""
+Write a fresh email offering the front-end offer. Under 40 words.
+
+Example:
+{first_name.lower()} -
+
+totally different idea. we're doing free {front_end_offer}s this month for teams scaling fast.
+
+30 mins, specific feedback, no pitch.
+
+want one?"""
 
         try:
             content = self._call_llm(system_prompt, user_prompt, temperature=0.9, json_mode=True)
@@ -1219,18 +1750,22 @@ Write a fresh email with different approach. Under 50 words."""
             subject = result.get("subject") or "different thought"
             body = result.get("body") or ""
             if not body.strip():
-                # Use fallback if empty
+                # LeadGenJay-style fallback
                 return {
                     "subject": "different thought",
-                    "body": f"""{first_name} - 
+                    "body": f"""{first_name.lower()} -
 
-totally different idea. we're doing free {front_end_offer}s for companies in your space.
+totally different idea. we're doing free {front_end_offer}s this month.
 
 30 mins, specific feedback, no pitch.
 
 interested?""",
                     "new_thread": True
                 }
+            
+            # Humanize
+            body = humanize_email(body)
+            
             return {
                 "subject": subject,
                 "body": body,
@@ -1239,9 +1774,9 @@ interested?""",
         except Exception as e:
             return {
                 "subject": "different thought",
-                "body": f"""{first_name} - 
+                "body": f"""{first_name.lower()} -
 
-totally different idea. we're doing free {front_end_offer}s for companies in your space.
+totally different idea. we're doing free {front_end_offer}s this month.
 
 30 mins, specific feedback, no pitch.
 
@@ -1250,18 +1785,25 @@ interested?""",
             }
     
     def _generate_breakup_email(self, lead: Dict, context: Dict, previous: List) -> Dict:
-        """Final email - helpful redirect, not guilt trip"""
+        """
+        Final email - helpful redirect, not guilt trip
+        
+        LeadGenJay: "Should I reach out to someone else?" is incredibly effective
+        because it triggers reciprocity. They feel bad ignoring you, and often
+        either respond or refer you to someone else.
+        """
         first_name = lead.get('first_name') or 'there'
         company = lead.get('company') or ''
         
         # LeadGenJay tip: "Should I reach out to someone else?" works well
-        body = f"""{first_name} -
+        # Keep it SHORT and non-desperate
+        body = f"""{first_name.lower()} -
 
 last note from me. if dev bandwidth becomes a priority at {company}, happy to help.
 
-or if there's someone else I should talk to, just point me their way.
+should I reach out to someone else on your team, or close the loop here?
 
-either way, rooting for you."""
+either way, rooting for you guys."""
 
         return {
             "subject": "closing the loop",

@@ -11,11 +11,61 @@ NOTE: Requires IMAP to be enabled in Zoho Mail settings:
 import imaplib
 import email
 from email.header import decode_header
-from typing import List, Dict, Optional, Set
+from typing import List, Dict, Optional, Set, Tuple
 from datetime import datetime, timedelta
 import re
 import config
-from database import Email, Lead, Campaign, emails_collection, leads_collection
+from database import Email, Lead, Campaign, emails_collection, leads_collection, DoNotContact
+
+
+# Auto-reply/Out-of-office patterns (subject and body)
+AUTO_REPLY_PATTERNS = [
+    # Subject patterns
+    r"out of (office|town)",
+    r"automatic reply",
+    r"auto[\-\s]?reply",
+    r"away from (office|email|my desk)",
+    r"on vacation",
+    r"on holiday",
+    r"on leave",
+    r"currently away",
+    r"out of the office",
+    r"will be out",
+    r"limited access",
+    r"maternity leave",
+    r"paternity leave",
+    r"sabbatical",
+    r"ooo:",
+    r"auto-?response",
+    r"\[auto\]",
+]
+
+# Patterns that indicate a permanent state (should add to do-not-contact)
+PERMANENT_AUTO_REPLY_PATTERNS = [
+    r"no longer (with|at|employed)",
+    r"left (the company|the organization|this position)",
+    r"is no longer (working|employed)",
+    r"has left",
+    r"moved on from",
+    r"this email (address )?(is )?no longer (active|monitored|in use)",
+    r"this (mailbox|inbox) is (not|no longer) (monitored|active)",
+]
+
+# Unsubscribe request patterns (in body)
+UNSUBSCRIBE_PATTERNS = [
+    r"unsubscribe",
+    r"remove me",
+    r"opt[\-\s]?out",
+    r"stop (emailing|contacting|sending)",
+    r"don'?t (email|contact|message)",
+    r"take me off",
+    r"no longer interested",
+    r"not interested",
+    r"please stop",
+    r"do not contact",
+    r"remove from (your )?(list|mailing)",
+    r"never (email|contact)",
+]
 
 
 class ReplyDetector:
@@ -27,6 +77,59 @@ class ReplyDetector:
         self.imap_port = 993
         self._connections: Dict[str, imaplib.IMAP4_SSL] = {}
         self._failed_accounts: Set[str] = set()  # Track accounts that failed to connect
+    
+    def _is_auto_reply(self, subject: str, body: str) -> Tuple[bool, bool]:
+        """
+        Check if an email is an auto-reply/out-of-office message.
+        
+        Returns:
+            (is_auto_reply, is_permanent) - is_permanent means they left the company etc.
+        """
+        text = f"{subject} {body}".lower()
+        
+        # Check for permanent auto-reply (left company etc)
+        for pattern in PERMANENT_AUTO_REPLY_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True, True
+        
+        # Check for temporary auto-reply (vacation, OOO)
+        for pattern in AUTO_REPLY_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True, False
+        
+        # Check email headers that indicate auto-reply
+        # (These would be checked in the actual email parsing)
+        
+        return False, False
+    
+    def _is_unsubscribe_request(self, subject: str, body: str) -> bool:
+        """Check if an email is an unsubscribe request"""
+        text = f"{subject} {body}".lower()
+        
+        for pattern in UNSUBSCRIBE_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+        
+        return False
+    
+    def _get_email_body(self, msg) -> str:
+        """Extract plain text body from email message"""
+        body = ""
+        try:
+            if msg.is_multipart():
+                for part in msg.walk():
+                    if part.get_content_type() == "text/plain":
+                        payload = part.get_payload(decode=True)
+                        if payload:
+                            body = payload.decode('utf-8', errors='ignore')
+                            break
+            else:
+                payload = msg.get_payload(decode=True)
+                if payload:
+                    body = payload.decode('utf-8', errors='ignore')
+        except Exception:
+            pass
+        return body
     
     def connect(self, account: Dict[str, str]) -> Optional[imaplib.IMAP4_SSL]:
         """Connect to IMAP server for an account"""
@@ -120,6 +223,11 @@ class ReplyDetector:
         """
         Check all accounts for replies from leads
         
+        Now also detects:
+        - Auto-replies/Out-of-office messages (logged but not counted as real replies)
+        - Unsubscribe requests (adds to do-not-contact list)
+        - Permanent auto-replies like "no longer with company" (adds to do-not-contact)
+        
         Args:
             since_days: Check emails from the last N days
             folder: IMAP folder to check
@@ -132,6 +240,9 @@ class ReplyDetector:
             "leads_updated": 0,
             "accounts_checked": 0,
             "accounts_failed": 0,
+            "auto_replies_found": 0,
+            "unsubscribe_requests": 0,
+            "do_not_contact_added": 0,
             "details": []
         }
         
@@ -181,39 +292,92 @@ class ReplyDetector:
                         from_addr = self._extract_email_address(msg.get("From", ""))
                         subject = self._decode_subject(msg.get("Subject", ""))
                         date_str = msg.get("Date", "")
+                        body = self._get_email_body(msg)
                         
                         # Check if this is from a lead we emailed
                         if from_addr in sent_to_addresses:
-                            results["replies_found"] += 1
+                            # First check if already on do-not-contact list
+                            if DoNotContact.is_blocked(from_addr):
+                                continue
                             
-                            # Update lead status
                             lead = Lead.get_by_email(from_addr)
-                            if lead:
-                                # Mark all emails to this lead as replied
-                                update_result = emails_collection.update_many(
-                                    {"lead_id": lead["_id"], "status": {"$ne": Email.STATUS_REPLIED}},
-                                    {"$set": {
-                                        "status": Email.STATUS_REPLIED,
-                                        "replied_at": datetime.utcnow()
-                                    }}
-                                )
+                            if not lead:
+                                continue
+                            
+                            # Check for auto-reply/OOO
+                            is_auto_reply, is_permanent = self._is_auto_reply(subject, body)
+                            
+                            if is_auto_reply:
+                                results["auto_replies_found"] += 1
                                 
-                                if update_result.modified_count > 0:
-                                    results["leads_updated"] += 1
-                                    
-                                    # Update campaign stats
-                                    campaign_emails = emails_collection.find({"lead_id": lead["_id"]})
-                                    for ce in campaign_emails:
-                                        Campaign.increment_stat(str(ce["campaign_id"]), "emails_replied")
+                                if is_permanent:
+                                    # "No longer with company" etc - add to do-not-contact
+                                    if DoNotContact.add(from_addr, DoNotContact.REASON_AUTO_REPLY, 
+                                                       f"Auto-reply: {subject[:100]}"):
+                                        results["do_not_contact_added"] += 1
+                                    print(f"   🏢 Permanent OOO from {lead.get('full_name', from_addr)}: {subject[:40]}...")
+                                else:
+                                    # Temporary OOO - just log it, don't count as reply
+                                    print(f"   ✈️  OOO from {lead.get('full_name', from_addr)}: {subject[:40]}...")
                                 
                                 results["details"].append({
                                     "from": from_addr,
                                     "subject": subject[:50],
                                     "lead_name": lead.get("full_name", "Unknown"),
-                                    "received_in": account["email"]
+                                    "received_in": account["email"],
+                                    "type": "permanent_ooo" if is_permanent else "auto_reply"
                                 })
+                                continue  # Don't count as real reply
+                            
+                            # Check for unsubscribe request
+                            if self._is_unsubscribe_request(subject, body):
+                                results["unsubscribe_requests"] += 1
                                 
-                                print(f"   📬 Reply from {lead.get('full_name', from_addr)}: {subject[:40]}...")
+                                # Add to do-not-contact list
+                                if DoNotContact.add(from_addr, DoNotContact.REASON_UNSUBSCRIBE,
+                                                   f"Unsubscribe request: {subject[:100]}"):
+                                    results["do_not_contact_added"] += 1
+                                
+                                print(f"   🚫 Unsubscribe request from {lead.get('full_name', from_addr)}")
+                                
+                                results["details"].append({
+                                    "from": from_addr,
+                                    "subject": subject[:50],
+                                    "lead_name": lead.get("full_name", "Unknown"),
+                                    "received_in": account["email"],
+                                    "type": "unsubscribe"
+                                })
+                                continue  # Don't count as positive reply
+                            
+                            # This is a real reply!
+                            results["replies_found"] += 1
+                            
+                            # Mark all emails to this lead as replied
+                            update_result = emails_collection.update_many(
+                                {"lead_id": lead["_id"], "status": {"$ne": Email.STATUS_REPLIED}},
+                                {"$set": {
+                                    "status": Email.STATUS_REPLIED,
+                                    "replied_at": datetime.utcnow()
+                                }}
+                            )
+                            
+                            if update_result.modified_count > 0:
+                                results["leads_updated"] += 1
+                                
+                                # Update campaign stats
+                                campaign_emails = emails_collection.find({"lead_id": lead["_id"]})
+                                for ce in campaign_emails:
+                                    Campaign.increment_stat(str(ce["campaign_id"]), "emails_replied")
+                            
+                            results["details"].append({
+                                "from": from_addr,
+                                "subject": subject[:50],
+                                "lead_name": lead.get("full_name", "Unknown"),
+                                "received_in": account["email"],
+                                "type": "reply"
+                            })
+                            
+                            print(f"   📬 Reply from {lead.get('full_name', from_addr)}: {subject[:40]}...")
                     
                     except Exception as e:
                         continue
@@ -226,7 +390,7 @@ class ReplyDetector:
     
     def check_bounces(self, since_days: int = 7) -> Dict[str, any]:
         """
-        Check for bounced emails
+        Check for bounced emails and add to do-not-contact list.
         
         Args:
             since_days: Check emails from the last N days
@@ -237,6 +401,7 @@ class ReplyDetector:
         results = {
             "bounces_found": 0,
             "leads_updated": 0,
+            "do_not_contact_added": 0,
             "details": []
         }
         
@@ -248,6 +413,24 @@ class ReplyDetector:
             "undeliverable",
             "returned mail",
             "delivery status notification"
+        ]
+        
+        # Hard bounce indicators (permanent failures - should add to do-not-contact)
+        hard_bounce_indicators = [
+            "user unknown",
+            "user not found",
+            "no such user",
+            "mailbox not found",
+            "invalid recipient",
+            "recipient rejected",
+            "address rejected",
+            "does not exist",
+            "mailbox unavailable",
+            "550",  # Common permanent failure code
+            "551",
+            "552",
+            "553",
+            "554",
         ]
         
         since_date = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
@@ -279,14 +462,11 @@ class ReplyDetector:
                         
                         if is_bounce:
                             # Try to extract the original recipient
-                            body = ""
-                            if msg.is_multipart():
-                                for part in msg.walk():
-                                    if part.get_content_type() == "text/plain":
-                                        body = part.get_payload(decode=True).decode('utf-8', errors='ignore')
-                                        break
-                            else:
-                                body = msg.get_payload(decode=True).decode('utf-8', errors='ignore')
+                            body = self._get_email_body(msg).lower()
+                            
+                            # Check if it's a hard bounce (permanent failure)
+                            full_text = f"{subject} {body}"
+                            is_hard_bounce = any(ind in full_text for ind in hard_bounce_indicators)
                             
                             # Find email addresses in the body
                             bounced_emails = re.findall(r'[\w\.-]+@[\w\.-]+', body)
@@ -303,12 +483,22 @@ class ReplyDetector:
                                     )
                                     
                                     results["leads_updated"] += 1
+                                    
+                                    # Add hard bounces to do-not-contact list
+                                    if is_hard_bounce:
+                                        if DoNotContact.add(bounced_email.lower(), 
+                                                          DoNotContact.REASON_HARD_BOUNCE,
+                                                          f"Hard bounce: {subject[:100]}"):
+                                            results["do_not_contact_added"] += 1
+                                    
                                     results["details"].append({
                                         "email": bounced_email,
-                                        "lead_name": lead.get("full_name", "Unknown")
+                                        "lead_name": lead.get("full_name", "Unknown"),
+                                        "hard_bounce": is_hard_bounce
                                     })
                                     
-                                    print(f"   📭 Bounce detected: {bounced_email}")
+                                    bounce_type = "hard" if is_hard_bounce else "soft"
+                                    print(f"   📭 Bounce ({bounce_type}): {bounced_email}")
                                     break
                     
                     except Exception as e:
@@ -325,10 +515,13 @@ class ReplyDetector:
 if __name__ == "__main__":
     detector = ReplyDetector()
     
-    print("Checking for replies...")
+    print("Checking for replies (including auto-replies and unsubscribes)...")
     results = detector.check_replies(since_days=7)
-    print(f"\nResults: {results['replies_found']} replies, {results['leads_updated']} leads updated")
+    print(f"\nReplies: {results['replies_found']} real replies, {results['leads_updated']} leads updated")
+    print(f"Auto-replies: {results['auto_replies_found']}")
+    print(f"Unsubscribes: {results['unsubscribe_requests']}")
+    print(f"Added to do-not-contact: {results['do_not_contact_added']}")
     
     print("\nChecking for bounces...")
     bounces = detector.check_bounces(since_days=7)
-    print(f"Results: {bounces['bounces_found']} bounces found")
+    print(f"Bounces: {bounces['bounces_found']} found, {bounces['do_not_contact_added']} added to do-not-contact")

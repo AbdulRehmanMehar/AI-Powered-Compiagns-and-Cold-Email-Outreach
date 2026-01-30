@@ -1,26 +1,49 @@
 {
   "scheduled_campaigns": [
     {
-      "description": "Target healthcare and medical technology companies that need software development",
+      "_comment": "RECOMMENDED: Fully autonomous - AI picks the best ICP based on performance",
+      "autonomous": true,
       "schedule_time": "09:00",
       "days": ["monday", "wednesday", "friday"],
       "max_leads": 15,
       "enabled": true
     },
     {
-      "description": "Target fintech startups looking to build mobile apps or web platforms",
-      "schedule_time": "10:00",
+      "_comment": "RECOMMENDED: Second autonomous campaign at different time",
+      "autonomous": true,
+      "schedule_time": "14:00",
       "days": ["tuesday", "thursday"],
       "max_leads": 15,
       "enabled": true
     },
     {
-      "description": "Target e-commerce businesses that need custom software or integrations",
-      "schedule_time": "14:00",
-      "days": ["monday", "thursday"],
+      "_comment": "ALTERNATIVE: Specific ICP template (if you want to force a target)",
+      "icp_template": "ctos_at_capacity",
+      "schedule_time": "11:00",
+      "days": ["wednesday"],
       "max_leads": 10,
-      "enabled": true
+      "enabled": false
+    },
+    {
+      "_comment": "LEGACY: Plain description (not recommended)",
+      "description": "Target healthcare companies that need software development",
+      "schedule_time": "10:00",
+      "days": ["monday"],
+      "max_leads": 10,
+      "enabled": false
     }
+  ],
+  "_modes_explained": {
+    "autonomous": "AI analyzes performance and picks the best ICP automatically (RECOMMENDED)",
+    "icp_template": "Use a specific pre-defined ICP template",
+    "description": "Legacy mode - AI guesses targeting from text (least reliable)"
+  },
+  "_available_icp_templates": [
+    "startup_founders_funded - Funded founders who need to ship fast",
+    "ctos_at_capacity - CTOs with stretched teams",
+    "ai_prototype_hell - Companies with AI demos that don't work in production",
+    "legacy_modernization - Companies with legacy systems holding them back",
+    "product_leaders_roadmap_slip - Product leaders whose roadmap keeps slipping"
   ],
   "schedules": {
     "followups": "11:00",

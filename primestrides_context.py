@@ -46,63 +46,121 @@ PrimeStrides is a boutique software development agency that ships production-rea
 
 # Real case studies with SPECIFIC numbers (not rounded)
 # LeadGenJay: "Use REAL numbers like 3.72x, not 4x - specifics build trust"
+# ADDED: company_hint and result_variations for varied email presentation
+# Case studies with ANONYMOUS company references (no client names disclosed)
+# Use descriptive industry terms instead of actual company names
 CASE_STUDIES = {
-    "roboapply": {
+    # HR Tech AI case study (aliases: roboapply, hr_tech_ai)
+    "hr_tech_ai": {
         "company_name": "an HR tech startup",
+        "company_hint": "an HR startup",  # Short version for emails
         "industry": "HR Tech / AI",
         "what_we_built": "AI-powered job application automation system",
         "timeline": "8 weeks",
         "result": "43% reduction in manual processing time",
         "result_short": "43% faster processing",
+        "result_variations": [
+            "cut manual processing 43%",
+            "reduced hiring workflow time by 43%",
+            "went from weeks of manual review to 43% faster automation",
+        ],
         "quote": "I'd never go back to a traditional agency - PrimeStrides shipped faster than our internal team could have.",
         "person": "CTO",
         "relevance": ["AI", "automation", "startups", "fast shipping", "HR tech"]
     },
-    "stratmap": {
+    # SaaS MVP case study (aliases: stratmap, saas_mvp)
+    "saas_mvp": {
         "company_name": "a B2B SaaS startup",
+        "company_hint": "a SaaS founder",
         "industry": "SaaS / Strategy",
         "what_we_built": "Full MVP - strategy mapping platform",
         "timeline": "6 weeks",
         "result": "Raised Series A 3 months after launch",
         "result_short": "Series A in 3 months post-launch",
+        "result_variations": [
+            "went from idea to Series A in under 4 months",
+            "launched in 6 weeks, closed Series A 3 months later",
+            "hit Series A velocity - 6 weeks to launch, funding 3 months after",
+        ],
         "quote": "They treated our MVP like a real product, not a throwaway prototype.",
         "person": "Founder",
         "relevance": ["MVP", "startups", "fundraising", "SaaS", "B2B"]
     },
-    "timpl": {
+    # Enterprise modernization case study (aliases: timpl, enterprise_modernization)
+    "enterprise_modernization": {
         "company_name": "an enterprise staffing company",
+        "company_hint": "an enterprise company",
         "industry": "Enterprise / Staffing",
         "what_we_built": "Legacy system modernization",
         "timeline": "12 weeks",
         "result": "3.2x faster deployment cycles, 41% operational cost reduction",
         "result_short": "3.2x faster deploys, 41% cost cut",
+        "result_variations": [
+            "3.2x faster deploy cycles and 41% cost savings",
+            "went from monthly deploys to 3.2x faster releases",
+            "slashed deploy time to 1/3rd and cut ops costs 41%",
+        ],
         "quote": "Finally - engineers who understood our legacy constraints but didn't use them as excuses.",
         "person": "VP Engineering",
         "relevance": ["legacy", "modernization", "enterprise", "cost reduction", "staffing"]
     },
     "fintech_client": {
         "company_name": "a Series B fintech",
+        "company_hint": "a fintech team",
         "industry": "FinTech",
         "what_we_built": "Payment processing overhaul",
         "timeline": "10 weeks",
         "result": "Transaction throughput up 2.7x, zero downtime migration",
         "result_short": "2.7x throughput, zero downtime",
+        "result_variations": [
+            "2.7x transaction throughput with zero downtime",
+            "scaled to 2.7x volume without dropping a single transaction",
+            "went from bottlenecked to 2.7x capacity in 10 weeks",
+        ],
         "quote": "We expected a 6-month project. They did it in 10 weeks.",
         "person": "CTO",
         "relevance": ["fintech", "payments", "scale", "enterprise", "B2B"]
     },
     "healthtech_client": {
         "company_name": "a HIPAA-compliant health startup",
+        "company_hint": "a healthtech startup",
         "industry": "HealthTech",
         "what_we_built": "Patient data platform with HIPAA compliance",
         "timeline": "8 weeks",
         "result": "Full HIPAA compliance + launch in under 2 months",
         "result_short": "HIPAA-compliant launch in 8 weeks",
+        "result_variations": [
+            "full HIPAA compliance in 8 weeks (others quoted 6 months)",
+            "launched HIPAA-compliant in 2 months flat",
+            "went from zero to HIPAA-certified production in 8 weeks",
+        ],
         "quote": "Other agencies said 6 months minimum for HIPAA. They did it in 8 weeks.",
         "person": "CEO",
-        "relevance": ["healthtech", "HIPAA", "compliance", "healthcare", "startups"]
+        "relevance": ["healthtech", "HIPAA", "compliance", "healthcare", "startups", "medical"]
+    },
+    "construction_tech": {
+        "company_name": "a construction tech company",
+        "company_hint": "a construction tech team",
+        "industry": "Construction Tech",
+        "what_we_built": "Field data sync platform with offline-first architecture",
+        "timeline": "10 weeks",
+        "result": "Site inspection time cut 60%, real-time sync across 40+ job sites",
+        "result_short": "60% faster inspections, 40+ sites synced",
+        "result_variations": [
+            "cut site inspection time 60% across 40+ job sites",
+            "went from day-old data to real-time sync in 10 weeks",
+            "40+ sites now syncing in real-time, 60% faster inspections",
+        ],
+        "quote": "Finally software that works when there's no cell signal.",
+        "person": "VP Operations",
+        "relevance": ["construction", "field service", "infrastructure", "logistics", "operations", "offline"]
     }
 }
+
+# Backward-compatible aliases for case studies (for any code using old keys)
+CASE_STUDIES["roboapply"] = CASE_STUDIES["hr_tech_ai"]
+CASE_STUDIES["stratmap"] = CASE_STUDIES["saas_mvp"]
+CASE_STUDIES["timpl"] = CASE_STUDIES["enterprise_modernization"]
 
 # ICP templates with expert-aligned targeting
 ICP_TEMPLATES = {
@@ -113,8 +171,8 @@ ICP_TEMPLATES = {
         "company_size": "1-50",
         "trigger_signals": ["recently raised", "hiring engineers", "launching new product"],
         "single_pain_point": "need to ship fast but can't find reliable senior talent",
-        "unique_angle": "we shipped RoboApply's AI in 8 weeks - their CTO said he'd never use another agency",
-        "relevant_case_study": "roboapply",
+        "unique_angle": "we shipped an HR tech startup's AI system in 8 weeks - their CTO won't use another agency",
+        "relevant_case_study": "hr_tech_ai",
         "front_end_offer": "free 30-min architecture review"
     },
     "ctos_at_capacity": {
@@ -125,7 +183,7 @@ ICP_TEMPLATES = {
         "trigger_signals": ["hiring multiple engineers", "launching new initiatives", "recent funding"],
         "single_pain_point": "team is stretched thin and can't hire fast enough",
         "unique_angle": "senior engineers who hit the ground running - no 3-month ramp up",
-        "relevant_case_study": "timpl",
+        "relevant_case_study": "enterprise_modernization",
         "front_end_offer": "free technical roadmap session"
     },
     "ai_prototype_hell": {
@@ -135,8 +193,8 @@ ICP_TEMPLATES = {
         "company_size": "10-500",
         "trigger_signals": ["hiring AI engineers", "AI initiative mentioned", "automation focus"],
         "single_pain_point": "AI prototypes that look good in demos but fail in production",
-        "unique_angle": "we ship production AI, not demo-ware - RoboApply's AI handles 10k+ applications daily",
-        "relevant_case_study": "roboapply",
+        "unique_angle": "we ship production AI, not demo-ware - one client's AI handles 10k+ applications daily",
+        "relevant_case_study": "hr_tech_ai",
         "front_end_offer": "free AI architecture review - we'll tell you why it's not working"
     },
     "legacy_modernization": {
@@ -146,8 +204,8 @@ ICP_TEMPLATES = {
         "company_size": "100-1000",
         "trigger_signals": ["digital transformation", "system upgrade mentioned", "hiring for modernization"],
         "single_pain_point": "legacy systems are the bottleneck but multi-year rewrites aren't an option",
-        "unique_angle": "we modernized Timpl's legacy stack in 12 weeks - 3.2x faster deployments, 41% cost cut",
-        "relevant_case_study": "timpl",
+        "unique_angle": "we modernized an enterprise company's legacy stack in 12 weeks - 3.2x faster deployments, 41% cost cut",
+        "relevant_case_study": "enterprise_modernization",
         "front_end_offer": "free legacy assessment - we'll identify the 20% causing 80% of your pain"
     },
     "product_leaders_roadmap_slip": {
@@ -157,9 +215,49 @@ ICP_TEMPLATES = {
         "company_size": "20-200",
         "trigger_signals": ["hiring product engineers", "new product launch", "roadmap planning"],
         "single_pain_point": "engineering is the bottleneck - features take 3x longer than planned",
-        "unique_angle": "we ship features in weeks not quarters - StratMap went idea to launch in 6 weeks",
-        "relevant_case_study": "stratmap",
+        "unique_angle": "we ship features in weeks not quarters - one SaaS client went idea to launch in 6 weeks",
+        "relevant_case_study": "saas_mvp",
         "front_end_offer": "free roadmap acceleration session"
+    }
+}
+
+# Industry-specific pain points for better targeting
+# LeadGenJay: "The pain point must be SPECIFIC to their world, not generic"
+INDUSTRY_PAIN_POINTS = {
+    "Technology": {
+        "founder": "shipping features while also fundraising and hiring is a juggling act that usually drops something",
+        "cto": "your backlog is growing faster than your team, and the good engineers are getting poached",
+        "product": "every sprint ends with less done than planned because the technical debt keeps compounding",
+    },
+    "Financial Services": {
+        "founder": "compliance keeps blocking releases while competitors ship weekly",
+        "cto": "maintaining uptime on legacy systems while building new features is impossible with current headcount",
+        "product": "every new feature needs 3 months of security review before it can ship",
+    },
+    "Software": {
+        "founder": "you're competing with companies that have 10x your engineering team",
+        "cto": "your senior engineers are stuck maintaining instead of building the next thing",
+        "product": "the gap between what you promised customers and what engineering can deliver keeps growing",
+    },
+    "Internet & Digital Media": {
+        "founder": "scaling infrastructure while adding features means something always breaks",
+        "cto": "every traffic spike becomes an all-hands emergency because there's no bandwidth for proper architecture",
+        "product": "user feedback comes in faster than your team can ship fixes",
+    },
+    "Healthcare": {
+        "founder": "HIPAA compliance turns every 2-week feature into a 3-month project",
+        "cto": "finding engineers who understand both healthcare compliance AND modern architecture is nearly impossible",
+        "product": "clinical workflows need to be perfect the first time - there's no 'move fast and break things' in healthcare",
+    },
+    "Human Resources & Staffing": {
+        "founder": "candidates expect a modern experience but your tech stack was built in 2015",
+        "cto": "integrating with 50 different ATS systems while keeping your core product moving forward",
+        "product": "recruiters need features yesterday but engineering is stuck on integrations",
+    },
+    "default": {
+        "founder": "growing the business and building the product at the same time usually means neither gets full attention",
+        "cto": "your best engineers are drowning in maintenance while the roadmap stalls",
+        "product": "the features customers want keep getting pushed because engineering is underwater",
     }
 }
 

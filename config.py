@@ -12,11 +12,13 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()  # "groq" or "openai"
 
 # Groq (RECOMMENDED - faster and cheaper)
 # Model options:
-#   - llama-3.3-70b-versatile: Best quality, but only 1K requests/day
-#   - llama-3.1-8b-instant: Good quality, 14.4K requests/day (RECOMMENDED for high volume)
+#   - llama-3.3-70b-versatile: Best quality, follows instructions well, 1K requests/day
+#   - llama-3.1-70b-versatile: Great quality, 1K requests/day
+#   - llama-3.1-8b-instant: POOR instruction following, 14.4K requests/day
 #   - meta-llama/llama-4-scout-17b-16e-instruct: Newer model, 1K requests/day
+# NOTE: The 8B model is terrible at following complex prompts!
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")  # High volume default
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")  # Quality over quantity
 
 # OpenAI (fallback when Groq rate limited)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
