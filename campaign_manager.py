@@ -844,8 +844,8 @@ class CampaignManager:
             if not dry_run:
                 self.email_sender.disconnect()
         
-        # Activate campaign if not already active
-        if campaign["status"] == Campaign.STATUS_DRAFT:
+        # Activate campaign if not already active (skip for orphan leads with no campaign)
+        if campaign and campaign.get("status") == Campaign.STATUS_DRAFT:
             Campaign.update_status(campaign_id, Campaign.STATUS_ACTIVE)
         
         print(f"\nResults: Sent {results['sent']}, Failed {results['failed']}, Skipped {results['skipped']}")
@@ -889,7 +889,7 @@ class CampaignManager:
         }
         
         if not pending_followups:
-            print("No follow-ups needed at this time")
+            # Don't print anything - caller will handle summary
             return results
         
         print(f"Found {len(pending_followups)} leads needing follow-up")

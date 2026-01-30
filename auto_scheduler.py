@@ -247,6 +247,8 @@ class AutoScheduler:
         
         if total_sent > 0:
             print(f"\n   ✅ Total follow-ups sent: {total_sent}")
+        elif total_sent == 0 and total_failed == 0:
+            print("   No follow-ups needed at this time")
     
     def send_initial_emails_task(self):
         """Task to send initial emails for draft campaigns"""
