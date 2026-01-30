@@ -1235,11 +1235,20 @@ Fix ALL the issues. Follow LeadGenJay's guidelines EXACTLY:
             # Use _call_llm for automatic model rotation on rate limits
             response_content = self._call_llm(system_prompt, user_prompt, temperature=0.8, json_mode=True)
             
+            # Handle None or empty response
+            if not response_content:
+                print(f"Rewrite failed: LLM returned empty response")
+                return email
+            
             result = json.loads(response_content)
             
             # Post-process to remove any AI tells the LLM sneaks in
-            subject = humanize_email(result.get("subject", email.get("subject", "")))
-            body = humanize_email(result.get("body", email.get("body", "")))
+            # Use 'or' to handle both None and empty string from result.get()
+            subject = result.get("subject") or email.get("subject", "")
+            body = result.get("body") or email.get("body", "")
+            
+            subject = humanize_email(subject) if subject else email.get("subject", "")
+            body = humanize_email(body) if body else email.get("body", "")
             
             return {
                 "subject": subject,

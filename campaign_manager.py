@@ -558,12 +558,19 @@ class CampaignManager:
             
             # Rewrite with feedback
             print(f"   🔄 Rewriting email with feedback...")
-            current_email = self.email_reviewer._rewrite_email(
+            rewritten = self.email_reviewer._rewrite_email(
                 email=current_email,
                 lead=lead,
                 review=review,
                 campaign_context=campaign_context
             )
+            
+            # Defensive check: ensure rewrite returned valid email dict
+            if rewritten and isinstance(rewritten, dict) and rewritten.get("subject") and rewritten.get("body"):
+                current_email = rewritten
+            else:
+                print(f"   ⚠️ Rewrite returned invalid result, keeping previous version")
+                # Keep current_email as-is
         
         return current_email, False
     
