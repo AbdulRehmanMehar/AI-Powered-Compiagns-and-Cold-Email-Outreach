@@ -29,17 +29,20 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    networks:
-      - app-network
     labels:
       - "com.docker.compose.project=coldemails"
       - "io.portainer.accesscontrol.teams=operations"
     logging:
-      driver: "json-file"
+      driver: gelf
       options:
-        max-size: "10m"
-        max-file: "3"
+        gelf-address: "udp://logstash:12201"
+        tag: "{{.Name}}"
+    networks:
+      - app-network
+      - elk
 
 networks:
   app-network:
     driver: bridge
+  elk:
+    external: true

@@ -280,18 +280,18 @@ class RocketReachClient:
     
     BASE_URL = "https://api.rocketreach.co/v2/api"
     
-    def __init__(self, verify_emails: bool = None):
+    def __init__(self, verify_emails: bool = True):
         """
         Args:
-            verify_emails: If True, verify emails before accepting (reduces bounces)
-                          If None, uses config.VERIFY_EMAILS
+            verify_emails: Always True - email verification is mandatory for deliverability
         """
         self.api_key = config.ROCKETREACH_API_KEY
         self.headers = {
             "Api-Key": self.api_key,
             "Content-Type": "application/json"
         }
-        self.verify_emails = verify_emails if verify_emails is not None else getattr(config, 'VERIFY_EMAILS', True)
+        # Always verify emails - this is critical to reduce bounces
+        self.verify_emails = True
     
     def search_people(self, 
                       query: str = None,
@@ -537,22 +537,20 @@ class RocketReachClient:
                             continue
                         
                         # VERIFY EMAIL before accepting (reduces bounces)
-                        # Only do our own SMTP check if RocketReach didn't already validate it
-                        if self.verify_emails:
-                            # Quick checks first (instant)
-                            is_valid, reason = quick_email_check(email)
-                            if not is_valid:
-                                print(f"   ⚠️ Skipping {email} - {reason}")
-                                continue
-                            
-                            # SMTP verification (slower but catches remaining bounces)
-                            if getattr(config, 'VERIFY_SMTP', True):
-                                smtp_valid, smtp_reason = verify_email_smtp(email, timeout=10)
-                                if smtp_valid is False:
-                                    print(f"   ⚠️ Skipping {email} - SMTP: {smtp_reason}")
-                                    continue
-                                elif smtp_valid is True and "Catch-all" in smtp_reason:
-                                    print(f"   ⚡ Warning: {email} - {smtp_reason}")
+                        # Always verify - this is critical for deliverability
+                        # Quick checks first (instant)
+                        is_valid, reason = quick_email_check(email)
+                        if not is_valid:
+                            print(f"   ⚠️ Skipping {email} - {reason}")
+                            continue
+                        
+                        # SMTP verification (slower but catches remaining bounces)
+                        smtp_valid, smtp_reason = verify_email_smtp(email, timeout=10)
+                        if smtp_valid is False:
+                            print(f"   ⚠️ Skipping {email} - SMTP: {smtp_reason}")
+                            continue
+                        elif smtp_valid is True and "Catch-all" in smtp_reason:
+                            print(f"   ⚡ Warning: {email} - {smtp_reason}")
                         
                         if is_valid_email(email):
                             profile["email"] = email

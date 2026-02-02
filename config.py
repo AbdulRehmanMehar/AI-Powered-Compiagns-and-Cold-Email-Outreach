@@ -72,10 +72,11 @@ MAX_FOLLOWUPS = int(os.getenv("MAX_FOLLOWUPS", "2"))  # 2 max (total 3 emails)
 # Legacy support
 FOLLOWUP_DELAY_DAYS = FOLLOWUP_1_DELAY_DAYS
 
-# Email Verification (reduces bounces from ~40% to <5%)
-VERIFY_EMAILS = os.getenv("VERIFY_EMAILS", "true").lower() == "true"
-VERIFY_MX_RECORDS = os.getenv("VERIFY_MX_RECORDS", "true").lower() == "true"
-VERIFY_SMTP = os.getenv("VERIFY_SMTP", "true").lower() == "true"  # SMTP verification (FREE, catches 100% of bounces)
+# Email Verification - ALWAYS ENABLED (reduces bounces from ~40% to <5%)
+# These are hardcoded to True because verification is critical for deliverability
+VERIFY_EMAILS = True  # Always verify emails before sending
+VERIFY_MX_RECORDS = True  # Always check MX records exist
+VERIFY_SMTP = True  # Always do SMTP verification (catches invalid mailboxes)
 SKIP_ROLE_BASED_EMAILS = os.getenv("SKIP_ROLE_BASED_EMAILS", "true").lower() == "true"
 SKIP_PROBLEMATIC_TLDS = os.getenv("SKIP_PROBLEMATIC_TLDS", "true").lower() == "true"
 

@@ -235,6 +235,38 @@ class Lead:
             {"_id": ObjectId(lead_id)},
             {"$set": update}
         )
+    
+    @staticmethod
+    def update_verification_status(lead_id: str, verification_status: str, 
+                                    verification_score: int, verification_reason: str,
+                                    verification_checks: dict = None):
+        """Store email verification results for a lead"""
+        from bson import ObjectId
+        update = {
+            "verification_status": verification_status,  # valid, invalid, risky, unknown
+            "verification_score": verification_score,  # 0-100
+            "verification_reason": verification_reason,
+            "verification_checks": verification_checks or {},
+            "verified_at": datetime.utcnow(),
+            "email_verified": verification_status == "valid" and verification_score >= 70
+        }
+        leads_collection.update_one(
+            {"_id": ObjectId(lead_id)},
+            {"$set": update}
+        )
+    
+    @staticmethod
+    def mark_invalid_email(lead_id: str, reason: str):
+        """Mark a lead's email as invalid (bounce or verification failure)"""
+        from bson import ObjectId
+        leads_collection.update_one(
+            {"_id": ObjectId(lead_id)},
+            {"$set": {
+                "email_invalid": True,
+                "email_invalid_reason": reason,
+                "email_invalid_at": datetime.utcnow()
+            }}
+        )
 
 
 class Email:

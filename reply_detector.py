@@ -475,6 +475,7 @@ class ReplyDetector:
                                 lead = Lead.get_by_email(bounced_email.lower())
                                 if lead:
                                     results["bounces_found"] += 1
+                                    lead_id = str(lead["_id"])
                                     
                                     # Mark emails as bounced
                                     emails_collection.update_many(
@@ -483,6 +484,10 @@ class ReplyDetector:
                                     )
                                     
                                     results["leads_updated"] += 1
+                                    
+                                    # Mark lead email as invalid to prevent future sends
+                                    bounce_type = "hard" if is_hard_bounce else "soft"
+                                    Lead.mark_invalid_email(lead_id, f"{bounce_type.title()} bounce detected")
                                     
                                     # Add hard bounces to do-not-contact list
                                     if is_hard_bounce:
@@ -497,7 +502,6 @@ class ReplyDetector:
                                         "hard_bounce": is_hard_bounce
                                     })
                                     
-                                    bounce_type = "hard" if is_hard_bounce else "soft"
                                     print(f"   📭 Bounce ({bounce_type}): {bounced_email}")
                                     break
                     

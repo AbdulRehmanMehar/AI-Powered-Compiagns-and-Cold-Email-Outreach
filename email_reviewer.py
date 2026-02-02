@@ -366,8 +366,8 @@ class EmailReviewer:
         self.min_passing_score = 70
         self.warning_threshold = 80
         self.max_word_count = 75
-        self.min_word_count = 25  # NEW: Minimum word count (too short = robotic)
-        self.ideal_word_count_min = 40
+        self.min_word_count = 18  # Minimum word count - lowered from 25 (was too strict)
+        self.ideal_word_count_min = 35
         self.ideal_word_count_max = 65
         self.max_subject_words = 4
     
@@ -476,6 +476,10 @@ class EmailReviewer:
                 if 'rate' in error_str and 'limit' in error_str:
                     self.rate_limiter.mark_model_depleted(available_model, "429_rate_limit")
                     print(f"   ⚠️ Reviewer: {available_model} hit rate limit, marked as depleted, trying next model...")
+                    continue
+                # If it's a 413 "Request Entity Too Large" error, skip this model (prompt too big for it)
+                elif '413' in error_str or 'too large' in error_str or 'payload' in error_str:
+                    print(f"   ⚠️ Reviewer: {available_model} returned 413 (prompt too large), trying next model...")
                     continue
                 else:
                     raise
@@ -610,57 +614,56 @@ class EmailReviewer:
         This is the SELF-IMPROVEMENT mechanism - we learn from past mistakes
         and inject that knowledge into the generation prompt.
         """
-        recent_failures = self.get_recent_reviews(days=days, only_failures=True, limit=50)
+        recent_failures = self.get_recent_reviews(days=days, only_failures=True, limit=200)
         
         if not recent_failures:
             return ""
         
-        # Aggregate common issues
-        issue_counts = {}
+        # Aggregate violations - but SKIP API failures (not quality issues)
         violation_counts = {}
-        all_suggestions = set()
         
         for review in recent_failures:
-            # Count issues by type
-            for issue in review.get('issues', []):
-                issue_type = issue.get('type', 'unknown')
-                msg = issue.get('message', '')[:60]
-                key = f"{issue_type}: {msg}"
-                issue_counts[key] = issue_counts.get(key, 0) + 1
+            # Skip API failures - these aren't quality issues
+            violations = review.get('rule_violations', [])
+            if violations and any('AI review failed' in str(v) for v in violations if v):
+                continue
             
             # Count rule violations
-            for violation in review.get('rule_violations', []):
-                v_key = violation[:60]
-                violation_counts[v_key] = violation_counts.get(v_key, 0) + 1
-            
-            # Collect suggestions
-            for suggestion in review.get('suggestions', []):
-                all_suggestions.add(suggestion[:100])
+            for violation in violations:
+                if not violation:
+                    continue
+                v_str = str(violation)
+                # Extract the key part (banned phrase or pattern)
+                if 'banned phrase' in v_str.lower():
+                    # Extract just the phrase: "Contains banned phrase: 'bandwidth'" -> "bandwidth"
+                    import re
+                    match = re.search(r"'([^']+)'", v_str)
+                    if match:
+                        v_key = f"NEVER use: '{match.group(1)}'"
+                        violation_counts[v_key] = violation_counts.get(v_key, 0) + 1
+                elif 'em dash' in v_str.lower():
+                    v_key = "NEVER use em dashes (—)"
+                    violation_counts[v_key] = violation_counts.get(v_key, 0) + 1
+                elif 'spammy pattern' in v_str.lower():
+                    match = re.search(r"'([^']+)'", v_str)
+                    if match:
+                        v_key = f"NEVER use in subject: '{match.group(1)}'"
+                        violation_counts[v_key] = violation_counts.get(v_key, 0) + 1
         
-        # Build improvement prompt
-        prompt_lines = [
-            "\n**LEARNED FROM PAST FAILURES (DO NOT REPEAT THESE MISTAKES):**"
-        ]
+        if not violation_counts:
+            return ""
         
-        # Top violations
-        if violation_counts:
-            top_violations = sorted(violation_counts.items(), key=lambda x: -x[1])[:5]
-            prompt_lines.append("\n🚫 Common rule violations:")
-            for violation, count in top_violations:
-                prompt_lines.append(f"  - {violation} (failed {count}x)")
+        # Build a CONCISE improvement prompt
+        prompt_lines = ["\n**CRITICAL - AVOID THESE (learned from past failures):**"]
         
-        # Top issues
-        if issue_counts:
-            top_issues = sorted(issue_counts.items(), key=lambda x: -x[1])[:5]
-            prompt_lines.append("\n⚠️ Recurring issues:")
-            for issue, count in top_issues:
-                prompt_lines.append(f"  - {issue} (occurred {count}x)")
+        # Top violations - only significant ones
+        top_violations = sorted(violation_counts.items(), key=lambda x: -x[1])[:5]
+        for violation, count in top_violations:
+            if count >= 2:  # Only include if happened multiple times
+                prompt_lines.append(f"- {violation} (failed {count}x)")
         
-        # Suggestions that worked
-        if all_suggestions:
-            prompt_lines.append("\n✅ Improvements to apply:")
-            for suggestion in list(all_suggestions)[:5]:
-                prompt_lines.append(f"  - {suggestion}")
+        if len(prompt_lines) == 1:
+            return ""  # No meaningful learnings
         
         return "\n".join(prompt_lines)
     
@@ -1172,9 +1175,18 @@ Pay special attention to whether this sounds human or AI-written."""
         """
         Rewrite email based on review feedback using full LeadGenJay guidelines.
         """
-        issues_text = "\n".join([f"- {i.get('message', str(i))}" for i in review.issues])
-        suggestions_text = "\n".join([f"- {s}" for s in review.suggestions])
-        violations_text = "\n".join([f"- {v}" for v in review.rule_violations])
+        # Safe access to review fields (handle potential None values)
+        issues = review.issues if review and hasattr(review, 'issues') and review.issues else []
+        suggestions = review.suggestions if review and hasattr(review, 'suggestions') and review.suggestions else []
+        rule_violations = review.rule_violations if review and hasattr(review, 'rule_violations') and review.rule_violations else []
+        
+        # Build text safely
+        issues_text = "\n".join([
+            f"- {i.get('message', str(i)) if isinstance(i, dict) else str(i)}" 
+            for i in issues
+        ])
+        suggestions_text = "\n".join([f"- {s}" for s in suggestions])
+        violations_text = "\n".join([f"- {v}" for v in rule_violations])
         
         # Get improvement context from past failures
         improvement_context = self.get_improvement_prompt(days=14)

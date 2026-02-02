@@ -249,14 +249,26 @@ class EmailVerifier:
             smtp.quit()
             
         except smtplib.SMTPServerDisconnected:
-            result['valid'] = True  # Server disconnected - assume valid (greylisting)
-            result['error'] = "Server disconnected (possible greylisting)"
+            # Server disconnected - could be greylisting OR invalid domain
+            # Be conservative: mark as INVALID (better to skip than bounce)
+            result['valid'] = False
+            result['error'] = "Server disconnected - possible greylisting or invalid"
         except socket.timeout:
-            result['valid'] = True  # Timeout - assume valid
-            result['error'] = "Connection timeout"
+            # Timeout usually means server doesn't respond - likely dead domain
+            result['valid'] = False
+            result['error'] = "Connection timeout - server not responding"
+        except ConnectionRefusedError:
+            # Server explicitly refused connection - domain/mail server is down
+            result['valid'] = False
+            result['error'] = "Connection refused - mail server down"
+        except OSError as e:
+            # Network errors (no route, unreachable, etc.)
+            result['valid'] = False
+            result['error'] = f"Network error: {str(e)}"
         except Exception as e:
-            result['valid'] = True  # Error - assume valid to avoid false negatives
-            result['error'] = str(e)
+            # Unknown error - be conservative and mark invalid
+            result['valid'] = False
+            result['error'] = f"Verification error: {str(e)}"
         
         return result
     

@@ -524,6 +524,11 @@ class CampaignManager:
         Returns:
             (email_content, passed) - The final email and whether it passed review
         """
+        # Safety check: ensure we have valid input
+        if not email_content or not isinstance(email_content, dict):
+            print(f"   ⚠️ Invalid email_content input - skipping review")
+            return email_content or {"subject": "Error", "body": "Error generating email"}, False
+        
         if not self.email_reviewer:
             return email_content, True
         
@@ -647,6 +652,14 @@ class CampaignManager:
                     results["skipped_do_not_contact"] = results.get("skipped_do_not_contact", 0) + 1
                     continue
                 
+                # INVALID EMAIL CHECK: Skip emails previously marked as invalid
+                if lead.get("email_invalid"):
+                    reason = lead.get("email_invalid_reason", "unknown")
+                    print(f"⛔ Skipping {lead_email} - marked invalid ({reason})")
+                    results["skipped"] += 1
+                    results["skipped_invalid"] = results.get("skipped_invalid", 0) + 1
+                    continue
+                
                 # EMAIL VERIFICATION CHECK: Skip leads with known-invalid emails from RocketReach
                 raw_data = lead.get("raw_data", {})
                 rr_emails = raw_data.get("emails", [])
@@ -675,15 +688,29 @@ class CampaignManager:
                     print(f"⛔ Skipping {lead_email} - previously bounced")
                     results["skipped"] += 1
                     results["skipped_bounced"] = results.get("skipped_bounced", 0) + 1
+                    # Also mark lead as invalid so future lookups are faster
+                    Lead.mark_invalid_email(lead_id, "Email bounced")
                     continue
                 
                 # MX/SMTP VERIFICATION: Verify email is deliverable before sending
                 verifier = get_email_verifier()
                 verification = verifier.verify(lead_email)
+                
+                # Store verification results for tracking
+                Lead.update_verification_status(
+                    lead_id=lead_id,
+                    verification_status=verification.status.value,
+                    verification_score=verification.score,
+                    verification_reason=verification.reason,
+                    verification_checks=verification.checks
+                )
+                
                 if verification.status == VerificationStatus.INVALID:
                     print(f"⛔ Skipping {lead_email} - failed MX/SMTP verification: {verification.reason}")
                     results["skipped"] += 1
                     results["skipped_invalid_mx_smtp"] = results.get("skipped_invalid_mx_smtp", 0) + 1
+                    # Mark as invalid so we don't retry
+                    Lead.mark_invalid_email(lead_id, f"Verification failed: {verification.reason}")
                     continue
                 elif verification.status == VerificationStatus.RISKY:
                     print(f"⚠️  Warning: {lead_email} is risky (score: {verification.score}) - {verification.reason}")
@@ -740,6 +767,12 @@ class CampaignManager:
                     campaign_context=campaign_context
                 )
                 
+                # Safety check: ensure we have valid email content
+                if not email_content or not isinstance(email_content, dict):
+                    print(f"   ⚠️ Email generation returned None/invalid - skipping lead")
+                    results["failed"] += 1
+                    continue
+                
                 # QUALITY GATE: Review email before sending
                 if self.enable_review:
                     email_content, review_passed = self._review_and_rewrite_if_needed(
@@ -748,16 +781,29 @@ class CampaignManager:
                         campaign_context=campaign_context
                     )
                     
+                    # Safety check: _review_and_rewrite_if_needed should never return None, but handle it
+                    if email_content is None:
+                        print(f"   ⚠️ Review returned None - skipping lead")
+                        results["failed"] += 1
+                        continue
+                    
                     if not review_passed:
                         print(f"   🚫 Email failed review after {self.max_rewrites} rewrites - marking for manual review")
                         results["manual_review"] = results.get("manual_review", 0) + 1
+                        subject = email_content.get("subject", "N/A") if isinstance(email_content, dict) else "N/A"
                         results["details"].append({
                             "lead_email": lead["email"],
-                            "subject": email_content.get("subject", "N/A"),
+                            "subject": subject,
                             "status": "manual_review_required",
                             "reason": "Failed quality review"
                         })
                         continue  # Skip to next lead
+                
+                # Final safety check before creating email record
+                if not email_content or not isinstance(email_content, dict) or not email_content.get("subject") or not email_content.get("body"):
+                    print(f"   ⚠️ Invalid email content (missing subject/body) - skipping lead")
+                    results["failed"] += 1
+                    continue
                 
                 # Create email record with ICP tracking
                 email_id = Email.create(
@@ -828,6 +874,12 @@ class CampaignManager:
                             # Actual send failure
                             Email.mark_failed(email_id, result.get("error", "Unknown error"))
                             results["failed"] += 1
+                            
+                            # If Zoho flagged recipient as invalid (554 error), mark lead
+                            if result.get("recipient_invalid"):
+                                Lead.mark_invalid_email(lead_id, f"Zoho blocked: {result.get('error', 'Invalid recipient')}")
+                                print(f"   ⚠️ Marked {lead_email} as invalid - Zoho blocked send")
+                            
                             results["details"].append({
                                 "lead_email": lead["email"],
                                 "subject": email_content["subject"],

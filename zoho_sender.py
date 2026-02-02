@@ -462,6 +462,15 @@ class ZohoEmailSender:
             error_code = getattr(e, 'smtp_code', None) or (e.args[0] if e.args and isinstance(e.args[0], int) else None)
             if error_code == 554 or '554' in str(e):
                 self._mark_account_blocked(from_email, str(e))
+                # 554 5.1.8 means Zoho blocked outgoing - recipient email is likely invalid
+                # Return special flag so caller can mark the lead as invalid
+                return {
+                    "success": False, 
+                    "error": error_msg, 
+                    "from_email": from_email,
+                    "recipient_invalid": True,  # Flag for caller to handle
+                    "error_code": 554
+                }
             
             # Remove dead connection
             if from_email in self._connections:

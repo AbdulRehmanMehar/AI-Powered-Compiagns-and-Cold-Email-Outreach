@@ -139,9 +139,10 @@ DEFAULT_GROQ_LIMITS = {
     'meta-llama/llama-4-maverick-17b-128e-instruct': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 6000, 'tokens_per_day': 500000, 'priority': 6},
     'meta-llama/llama-4-scout-17b-16e-instruct': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 30000, 'tokens_per_day': 500000, 'priority': 7},
     
-    # NOTE: Guard/utility models and other experimental models removed
-    # They were either blocked at org level or not suitable for email generation
-    # Only keeping models that are tested and working for our use case
+    # Additional models for more capacity
+    'openai/gpt-oss-120b': {'requests_per_minute': 30, 'requests_per_day': 1000, 'tokens_per_minute': 8000, 'tokens_per_day': 200000, 'priority': 8},
+    'moonshotai/kimi-k2-instruct': {'requests_per_minute': 60, 'requests_per_day': 1000, 'tokens_per_minute': 10000, 'tokens_per_day': 300000, 'priority': 9},
+    'allam-2-7b': {'requests_per_minute': 30, 'requests_per_day': 7000, 'tokens_per_minute': 6000, 'tokens_per_day': 500000, 'priority': 10},
 }
 
 # Fallback chain for chat completions (ordered by quality, then capacity)
@@ -150,9 +151,12 @@ GROQ_FALLBACK_CHAIN = [
     'groq/compound',                                    # Best quality - unlimited tokens!
     'groq/compound-mini',                               # Good quality - unlimited tokens!
     'llama-3.3-70b-versatile',                         # High quality 70B (1K/day, 100K tokens)
+    'openai/gpt-oss-120b',                             # OpenAI 120B via Groq (1K/day, 200K tokens)
     'qwen/qwen3-32b',                                  # Good 32B model (1K/day, 500K tokens)
+    'moonshotai/kimi-k2-instruct',                     # Moonshot Kimi K2 (1K/day, 300K tokens)
     'meta-llama/llama-4-maverick-17b-128e-instruct',  # Llama 4 17B (1K/day, 500K tokens)
     'meta-llama/llama-4-scout-17b-16e-instruct',      # Llama 4 Scout (1K/day, 500K tokens)
+    'allam-2-7b',                                      # Allam 7B (7K/day, 500K tokens) - high request limit!
     'llama-3.1-8b-instant',                            # LAST RESORT - fast but lower quality (14.4K/day)
 ]
 
@@ -247,15 +251,23 @@ class GroqRateLimiter:
             doc = self.db.find_one({"model": model})
             if doc:
                 usage = doc.get('usage', {})
-                # Reset daily usage if it's a new day
-                if usage.get('date') != today:
+                # Reset daily usage if:
+                # 1. It's a new day, OR
+                # 2. Model was depleted (give it a fresh start each load)
+                is_new_day = usage.get('date') != today
+                was_depleted = usage.get('depleted_reason') is not None
+                
+                if is_new_day or was_depleted:
                     usage = {
                         "date": today,
                         "requests_today": 0,
                         "tokens_today": 0,
                         "minute_requests": []
+                        # Note: depleted_reason is NOT copied - fresh start
                     }
                     self._save_usage(model, usage)
+                    if was_depleted:
+                        logger.info(f"Reset depleted model {model} - fresh start")
                 
                 return {
                     'model': model,
@@ -347,6 +359,13 @@ class GroqRateLimiter:
         usage = data.get('usage', {})
         now = time.time()
         
+        # Check if model was marked depleted (should have been reset by _load_model, but double-check)
+        if usage.get('depleted_reason'):
+            # Force reload to trigger reset
+            self._cache.pop(model, None)
+            data = self._get_cached(model)
+            usage = data.get('usage', {})
+        
         # Check daily request limit
         requests_today = usage.get('requests_today', 0)
         if requests_today >= data['requests_per_day']:
@@ -388,18 +407,17 @@ class GroqRateLimiter:
     
     def mark_model_depleted(self, model: str, reason: str = "rate_limit"):
         """
-        Mark a model as depleted for today (hit rate limit from API).
-        This maxes out BOTH request and token counts so check_limit will reject it.
+        Mark a model as depleted (hit rate limit from API).
+        The model will be reset on next load/initialization.
         """
         data = self._get_cached(model)
         usage = data.get('usage', {})
         
-        # Max out both limits to ensure model is skipped
-        usage['requests_today'] = data.get('requests_per_day', 1000)
-        usage['tokens_today'] = data.get('tokens_per_day', 100000)
-        usage['date'] = self._get_today()
+        # Just mark as depleted - don't max out counters
+        # The depleted_reason flag will trigger a reset on next load
         usage['depleted_reason'] = reason
         usage['depleted_at'] = time.time()
+        # Don't change the date - let the reset logic handle it
         
         data['usage'] = usage
         self._cache[model] = data
@@ -818,6 +836,10 @@ class EmailGenerator:
                     # Model returned empty or invalid content, try next
                     print(f"   ⚠️ {available_model} returned bad response, trying next model...")
                     continue
+                elif '413' in error_str or 'too large' in error_str or 'payload' in error_str:
+                    # Prompt too large for this model, try next
+                    print(f"   ⚠️ {available_model} returned 413 (prompt too large), trying next model...")
+                    continue
                 else:
                     # Non-rate-limit error, raise it
                     raise
@@ -1199,13 +1221,15 @@ Remember:
         # Ideal: Decision-makers who can buy and need dev help
         decision_maker_titles = [
             "founder", "co-founder", "ceo", "cto", "chief technology",
-            "vp engineering", "head of engineering", "vp product",
-            "head of product", "cpo", "chief product"
+            "vp engineering", "vp of engineering", "head of engineering", "vp product",
+            "vp of product", "head of product", "cpo", "chief product",
+            "engineering director", "director of engineering", "director engineering"
         ]
         
         technical_titles = [
-            "cto", "chief technology", "vp engineering", "head of engineering",
-            "engineering director", "software director"
+            "cto", "chief technology", "vp engineering", "vp of engineering",
+            "head of engineering", "engineering director", "director of engineering",
+            "software director", "technical director"
         ]
         
         is_decision_maker = any(t in title for t in decision_maker_titles)
