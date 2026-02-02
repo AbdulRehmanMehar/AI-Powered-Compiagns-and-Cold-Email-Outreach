@@ -35,7 +35,7 @@ services:
     logging:
       driver: gelf
       options:
-        gelf-address: "udp://logstash:12201"
+        gelf-address: ${GELF_ADDRESS}
         tag: "{{.Name}}"
     networks:
       - app-network
