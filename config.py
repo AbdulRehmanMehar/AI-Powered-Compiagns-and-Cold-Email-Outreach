@@ -27,6 +27,11 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 # RocketReach
 ROCKETREACH_API_KEY = os.getenv("ROCKETREACH_API_KEY")
 
+# RocketReach Search Settings - Optimize for lead volume
+ROCKETREACH_MAX_PAGE_SIZE = int(os.getenv("ROCKETREACH_MAX_PAGE_SIZE", "100"))  # Max per API call
+ROCKETREACH_FETCH_MULTIPLIER = float(os.getenv("ROCKETREACH_FETCH_MULTIPLIER", "3"))  # Fetch 3x leads to account for filtering
+ROCKETREACH_RETRY_WITHOUT_KEYWORDS = os.getenv("ROCKETREACH_RETRY_WITHOUT_KEYWORDS", "true").lower() == "true"  # Fallback to broader search
+
 # Zoho Email - Multiple Accounts Support
 def parse_email_accounts() -> List[Dict[str, str]]:
     """Parse multiple email accounts from environment"""

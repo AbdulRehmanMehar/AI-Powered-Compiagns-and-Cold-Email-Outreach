@@ -603,29 +603,60 @@ Remember:
         base_titles = template.get("titles", [])
         expanded_titles = set(base_titles)
         
-        # Add common variations
+        # Add common variations and related roles for MAXIMUM coverage
         for title in base_titles:
             title_lower = title.lower()
             if "founder" in title_lower:
-                expanded_titles.update(["Founder", "Co-Founder", "CEO", "CEO & Founder", "Co-founder and CEO"])
+                expanded_titles.update([
+                    "Founder", "Co-Founder", "CEO", "CEO & Founder", "Co-founder and CEO",
+                    "Founder & CEO", "Owner", "Principal"
+                ])
             if "cto" in title_lower:
-                expanded_titles.update(["CTO", "Chief Technology Officer", "VP Engineering", "VP of Engineering"])
+                expanded_titles.update([
+                    "CTO", "Chief Technology Officer", "VP Engineering", "VP of Engineering",
+                    "Director of Engineering", "Engineering Manager"
+                ])
             if "vp" in title_lower and "engineering" in title_lower:
-                expanded_titles.update(["VP Engineering", "VP of Engineering", "Head of Engineering", "Engineering Director"])
+                expanded_titles.update([
+                    "VP Engineering", "VP of Engineering", "Head of Engineering", 
+                    "Engineering Director", "Director of Engineering", "SVP Engineering"
+                ])
             if "product" in title_lower:
-                expanded_titles.update(["VP Product", "VP of Product", "Head of Product", "CPO", "Chief Product Officer"])
+                expanded_titles.update([
+                    "VP Product", "VP of Product", "Head of Product", "CPO", 
+                    "Chief Product Officer", "Director of Product", "Product Director"
+                ])
+            if "ceo" in title_lower:
+                expanded_titles.update([
+                    "CEO", "Chief Executive Officer", "Founder", "Co-Founder",
+                    "Managing Director", "President"
+                ])
         
         # Build keywords from industries + trigger signals (NOT as filters)
         keywords = []
-        keywords.extend(template.get("industries", []))
-        keywords.extend(template.get("trigger_signals", [])[:2])  # Top 2 signals
+        industries = template.get("industries", [])
         
-        # Remove duplicates and generic terms
-        keywords = list(set(kw for kw in keywords if kw.lower() not in ["technology", "software"]))
+        # CHANGE: Be more selective with keywords - too many narrow the search
+        # Only use top 1-2 most specific industries, skip generic ones
+        specific_industries = [ind for ind in industries if ind.lower() not in 
+                              ["technology", "software", "saas", "startup", "tech"]]
+        if specific_industries:
+            keywords.extend(specific_industries[:2])  # Top 2 specific ones only
+        
+        # Don't use trigger_signals as keywords - they're too narrow
+        # REMOVED: keywords.extend(template.get("trigger_signals", [])[:2])
+        
+        # Keep it simple - fewer keywords = broader search
+        keywords = list(set(keywords))[:3]  # Max 3 keywords
         
         criteria = {
             "current_title": list(expanded_titles),
-            "location": ["United States", "Canada", "United Kingdom"],
+            # EXPANDED: Added more English-speaking markets + major tech hubs
+            "location": [
+                "United States", "Canada", "United Kingdom", 
+                "Australia", "Ireland", "New Zealand",  # English-speaking
+                "Germany", "France", "Netherlands", "Sweden", "Singapore"  # Major tech hubs
+            ],
             "keywords": keywords if keywords else ["startup", "SaaS", "tech"]
             # NOTE: No 'industry' field - too restrictive in RocketReach
         }

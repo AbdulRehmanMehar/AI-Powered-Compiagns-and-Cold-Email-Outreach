@@ -439,7 +439,12 @@ class RocketReachClient:
         from database import SearchOffsetTracker
         
         leads = []
-        page_size = min(25, max_leads)
+        # Use configurable page_size to get more results per API call
+        # Fetch multiplier accounts for emails that get filtered out by validation
+        page_size = min(
+            getattr(config, 'ROCKETREACH_MAX_PAGE_SIZE', 100), 
+            int(max_leads * getattr(config, 'ROCKETREACH_FETCH_MULTIPLIER', 3))
+        )
         exclude_emails = {e.lower() for e in (exclude_emails or set())}
         skipped_existing = 0
         
@@ -466,7 +471,30 @@ class RocketReachClient:
             
             if not profiles:
                 print(f"   ⚠️  No more profiles found at offset {start}")
-                break
+                
+                # FALLBACK: If we got zero results and we're using keywords, try without them
+                if start == initial_start and criteria.get("keywords"):
+                    print(f"   🔄 Retrying without keywords for broader results...")
+                    broader_criteria = {k: v for k, v in criteria.items() if k != "keywords"}
+                    search_results = self.search_people(
+                        current_title=broader_criteria.get("current_title") or broader_criteria.get("titles"),
+                        current_employer=broader_criteria.get("current_employer"),
+                        location=broader_criteria.get("location"),
+                        industry=broader_criteria.get("industry") or broader_criteria.get("industries"),
+                        page_size=page_size,
+                        start=start
+                    )
+                    profiles = search_results.get("profiles", [])
+                    pagination = search_results.get("pagination", {})
+                    total_available = pagination.get("total", 0)
+                    
+                    if profiles:
+                        print(f"   ✅ Found {len(profiles)} profiles with broader search")
+                        # Continue with these profiles (code below will process them)
+                    else:
+                        break
+                else:
+                    break
             
             print(f"   🔍 Searching offset {start}-{start+len(profiles)} (total available: {total_available})")
             
