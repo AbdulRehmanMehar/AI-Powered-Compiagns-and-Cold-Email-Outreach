@@ -34,11 +34,6 @@ services:
     labels:
       - "com.docker.compose.project=autonomouscoldemails"
       - "io.portainer.accesscontrol.teams=operations"
-    logging:
-      driver: gelf
-      options:
-        gelf-address: ${GELF_ADDRESS}
-        tag: "{{.Name}}"
     networks:
       - app-network
       - elk
