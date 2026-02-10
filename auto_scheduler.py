@@ -197,7 +197,7 @@ class AutoScheduler:
     
     def check_replies_task(self):
         """Task to check for replies across all accounts"""
-        print(f"\n[{get_target_time_str()}] 📬 Checking for replies...")
+        print(f"\n[{get_target_time_str()}] 📬 Phase 1/2: Checking for replies...")
         
         try:
             results = self.reply_detector.check_replies(since_days=1)
@@ -209,13 +209,19 @@ class AutoScheduler:
             else:
                 print(f"   No new replies")
             
-            # Also check bounces
+            print(f"[{get_target_time_str()}] 📬 Phase 2/2: Checking for bounces...")
             bounces = self.reply_detector.check_bounces(since_days=1)
             if bounces['bounces_found'] > 0:
                 print(f"   Found {bounces['bounces_found']} bounces")
+            else:
+                print(f"   No new bounces")
+            
+            print(f"[{get_target_time_str()}] ✅ Reply/bounce check complete")
                 
         except Exception as e:
-            print(f"   Error checking replies: {e}")
+            print(f"   ❌ Error checking replies: {e}")
+            import traceback
+            traceback.print_exc()
     
     def send_followups_task(self):
         """Task to send follow-up emails for all active campaigns"""
@@ -227,11 +233,14 @@ class AutoScheduler:
             print("   No active campaigns")
             return
         
+        print(f"   Processing {len(active_campaigns)} active campaign(s)...")
         total_sent = 0
         total_failed = 0
         
-        for campaign in active_campaigns:
+        for i, campaign in enumerate(active_campaigns, 1):
             campaign_id = str(campaign["_id"])
+            campaign_name = campaign.get('name', 'Unknown')
+            print(f"   [{i}/{len(active_campaigns)}] {campaign_name}...")
             
             try:
                 results = self.manager.send_followup_emails(campaign_id)
@@ -239,13 +248,17 @@ class AutoScheduler:
                 failed = results.get('failed', 0)
                 
                 if sent > 0 or failed > 0:
-                    print(f"   {campaign['name']}: Sent {sent}, Failed {failed}")
+                    print(f"      → Sent {sent}, Failed {failed}")
+                else:
+                    print(f"      → No follow-ups needed")
                 
                 total_sent += sent
                 total_failed += failed
                 
             except Exception as e:
-                print(f"   Error in {campaign['name']}: {e}")
+                print(f"      ❌ Error: {e}")
+                import traceback
+                traceback.print_exc()
         
         if total_sent > 0:
             print(f"\n   ✅ Total follow-ups sent: {total_sent}")
@@ -497,23 +510,44 @@ class AutoScheduler:
                 )
         
         # Run initial checks
+        print(f"\n{'='*60}")
+        print(f"🔄 STARTUP PHASE 1/4: Checking replies & bounces...")
+        print(f"{'='*60}")
         self.check_replies_task()
+        
+        print(f"\n{'='*60}")
+        print(f"🔄 STARTUP PHASE 2/4: Processing follow-ups...")
+        print(f"{'='*60}")
         self.send_followups_task()
         
-        # Run any missed campaigns from earlier today
+        print(f"\n{'='*60}")
+        print(f"🔄 STARTUP PHASE 3/4: Catching up missed campaigns...")
+        print(f"{'='*60}")
         self._run_missed_campaigns()
         
-        # Run initial health check
-        print("\n" + "=" * 60)
-        print("Running initial health check...")
-        print("=" * 60)
+        print(f"\n{'='*60}")
+        print(f"🔄 STARTUP PHASE 4/4: Health check...")
+        print(f"{'='*60}")
         self.check_system_health()
         
+        print(f"\n{'='*60}")
+        print(f"✅ STARTUP COMPLETE — entering main loop")
+        print(f"   Next actions will run on schedule. Heartbeat every 15 min.")
+        print(f"{'='*60}")
+        
         self._running = True
+        self._heartbeat_counter = 0
         
         while self._running:
             try:
                 schedule.run_pending()
+                self._heartbeat_counter += 1
+                if self._heartbeat_counter >= 15:  # Every 15 minutes
+                    next_jobs = schedule.get_jobs()
+                    next_run = min((j.next_run for j in next_jobs), default=None) if next_jobs else None
+                    next_str = next_run.strftime('%H:%M') if next_run else 'none'
+                    print(f"[{get_target_time_str()}] 💓 Alive — next scheduled job at {next_str} server time")
+                    self._heartbeat_counter = 0
                 time.sleep(60)  # Check every minute
             except KeyboardInterrupt:
                 print("\n\n⏹️  Scheduler stopped")

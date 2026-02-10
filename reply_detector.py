@@ -147,11 +147,15 @@ class ReplyDetector:
                 pass
         
         try:
-            mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
+            mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=30)
             mail.login(email_addr, account["password"])
             self._connections[email_addr] = mail
             print(f"   ✅ Connected to inbox: {email_addr}")
             return mail
+        except (TimeoutError, OSError) as e:
+            print(f"   ⏱️  {email_addr}: Connection timeout ({e})")
+            self._failed_accounts.add(email_addr)
+            return None
         except imaplib.IMAP4.error as e:
             error_msg = str(e)
             if "IMAP" in error_msg.upper():
@@ -435,9 +439,11 @@ class ReplyDetector:
         
         since_date = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
         
-        for account in self.accounts:
+        for i, account in enumerate(self.accounts, 1):
+            print(f"   [{i}/{len(self.accounts)}] Checking bounces: {account['email']}...")
             mail = self.connect(account)
             if not mail:
+                print(f"   [{i}/{len(self.accounts)}] \u26a0\ufe0f  Skipped (connection failed)")
                 continue
             
             try:
