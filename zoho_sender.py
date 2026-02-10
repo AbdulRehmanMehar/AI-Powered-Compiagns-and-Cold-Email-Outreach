@@ -215,33 +215,44 @@ class ZohoEmailSender:
         self._emails_sent_current_account = self.emails_per_account
     
     def _get_connection(self, account: Dict[str, str]) -> Optional[smtplib.SMTP]:
-        """Get or create SMTP connection for an account"""
+        """Create a fresh SMTP connection for an account.
+        
+        We always create a new connection because Ollama-based email generation
+        takes 30-40s between sends, causing Zoho to drop idle connections.
+        Fresh connections are more reliable than stale cached ones.
+        """
         email = account["email"]
         
-        # Check if we have an existing connection
+        # Close any existing connection first
         if email in self._connections:
             try:
-                # Test if connection is still alive
-                self._connections[email].noop()
-                return self._connections[email]
+                self._connections[email].quit()
             except:
-                # Connection dead, remove it
-                try:
-                    self._connections[email].quit()
-                except:
-                    pass
-                del self._connections[email]
+                pass
+            del self._connections[email]
         
-        # Create new connection
+        # Create fresh connection with 60s timeout
+        import time as _time
+        _start = _time.time()
         try:
-            server = smtplib.SMTP(self.smtp_host, self.smtp_port)
+            print(f"   📡 [{email}] Connecting to {self.smtp_host}:{self.smtp_port}...")
+            server = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=60)
+            elapsed = _time.time() - _start
+            print(f"   📡 [{email}] TCP connected ({elapsed:.1f}s), starting TLS...")
             server.starttls()
+            elapsed = _time.time() - _start
+            print(f"   📡 [{email}] TLS ready ({elapsed:.1f}s), logging in...")
             server.login(email, account["password"])
-            self._connections[email] = server
-            print(f"   Connected to Zoho as {email}")
+            elapsed = _time.time() - _start
+            print(f"   ✅ [{email}] Connected and authenticated ({elapsed:.1f}s)")
             return server
+        except (TimeoutError, OSError) as e:
+            elapsed = _time.time() - _start
+            print(f"   ⏱️  [{email}] SMTP timeout after {elapsed:.1f}s: {e}")
+            return None
         except Exception as e:
-            print(f"   Failed to connect as {email}: {e}")
+            elapsed = _time.time() - _start
+            print(f"   ❌ [{email}] SMTP failed after {elapsed:.1f}s: {e}")
             return None
     
     def disconnect_all(self):
@@ -429,12 +440,26 @@ class ZohoEmailSender:
                 recipients.extend(bcc)
             
             # Get connection
+            import time as _time
+            print(f"   📤 Preparing to send to {to_email} via {from_email}...")
             server = self._get_connection(account)
             if not server:
                 return {"success": False, "error": f"Failed to connect as {from_email}", "from_email": from_email}
             
-            # Send email
+            # Send email (set socket timeout for the send operation)
+            _send_start = _time.time()
+            server.sock.settimeout(60)
+            print(f"   📤 Sending email to {to_email}...")
             server.sendmail(from_email, recipients, msg.as_string())
+            _send_elapsed = _time.time() - _send_start
+            print(f"   📤 Email transmitted ({_send_elapsed:.1f}s), closing connection...")
+            
+            # Close connection immediately — don't cache
+            try:
+                server.quit()
+            except:
+                pass
+            print(f"   📤 Connection closed cleanly")
             
             # Track the send for daily limits
             SendingStats.increment_send(from_email)
@@ -473,13 +498,19 @@ class ZohoEmailSender:
                 }
             
             # Remove dead connection
-            if from_email in self._connections:
-                del self._connections[from_email]
+            try:
+                server.quit()
+            except:
+                pass
             
             return {"success": False, "error": error_msg, "from_email": from_email}
         except Exception as e:
             error_msg = f"Error sending to {to_email}: {str(e)}"
             print(f"   ❌ {error_msg}")
+            try:
+                server.quit()
+            except:
+                pass
             return {"success": False, "error": error_msg, "from_email": from_email}
     
     def send_bulk_emails(self,
