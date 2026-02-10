@@ -7,8 +7,8 @@ load_dotenv()
 # Database
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# LLM Provider (Groq or OpenAI)
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()  # "groq" or "openai"
+# LLM Provider (Groq, OpenAI, or Ollama)
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()  # "groq", "openai", or "ollama"
 
 # Groq (RECOMMENDED - faster and cheaper)
 # Model options:
@@ -23,6 +23,11 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")  # Quality over 
 # OpenAI (fallback when Groq rate limited)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+
+# Ollama (local LLM server - unlimited, no rate limits)
+# Example: http://192.168.1.9:11434 or http://localhost:11434
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://192.168.1.9:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")  # Other options: qwen2.5:14b (needs 8.7GB RAM), llama3.1:8b
 
 # RocketReach
 ROCKETREACH_API_KEY = os.getenv("ROCKETREACH_API_KEY")

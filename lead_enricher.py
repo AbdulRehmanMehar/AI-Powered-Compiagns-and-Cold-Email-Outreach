@@ -28,8 +28,7 @@ from bs4 import BeautifulSoup
 from groq import Groq
 
 from database import leads_collection
-from config import GROQ_API_KEY
-from email_generator import get_rate_limiter, GROQ_FALLBACK_CHAIN, GROQ_MODEL_LIMITS
+from email_generator import get_llm_client, get_rate_limiter, GROQ_FALLBACK_CHAIN, GROQ_MODEL_LIMITS
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -51,9 +50,9 @@ class LeadEnricher:
     """
     
     def __init__(self):
-        # Disable SDK auto-retry - we handle retries ourselves with model rotation
-        self.groq_client = Groq(api_key=GROQ_API_KEY, max_retries=0)
-        self.rate_limiter = get_rate_limiter()
+        # Use the same LLM client as email_generator (respects LLM_PROVIDER config)
+        self.client, self.model, self.provider = get_llm_client()
+        self.rate_limiter = get_rate_limiter() if self.provider == 'groq' else None
         self.http_client = httpx.AsyncClient(
             timeout=REQUEST_TIMEOUT,
             follow_redirects=True,
@@ -65,14 +64,30 @@ class LeadEnricher:
     
     def _call_llm(self, prompt: str, temperature: float = 0.3, max_tokens: int = 1000) -> str:
         """
-        Call LLM with automatic model rotation on rate limits.
+        Call LLM with automatic model rotation on rate limits (Groq only).
+        For Ollama/OpenAI, calls directly without rotation.
         """
+        # For Ollama/OpenAI, make direct call without rate limiting
+        if self.provider in ['openai', 'ollama']:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            
+            content = response.choices[0].message.content
+            if not content or content.strip() == '':
+                raise ValueError(f"Model {self.model} returned empty response")
+            return content
+        
+        # For Groq, use rate limiter and model rotation
         tried_models = set()
         last_error = None
         
         while True:
             # Find an available model
-            available_model = self.rate_limiter.get_best_available_model(ENRICHMENT_MODEL)
+            available_model = self.rate_limiter.get_best_available_model(self.model)
             
             if available_model in tried_models:
                 for model in GROQ_FALLBACK_CHAIN:
@@ -88,7 +103,7 @@ class LeadEnricher:
             tried_models.add(available_model)
             
             try:
-                response = self.groq_client.chat.completions.create(
+                response = self.client.chat.completions.create(
                     model=available_model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=temperature,
@@ -116,6 +131,15 @@ class LeadEnricher:
                 if 'rate' in error_str and 'limit' in error_str:
                     self.rate_limiter.mark_model_depleted(available_model, "429_rate_limit")
                     logger.warning(f"Enricher: {available_model} hit rate limit, marked as depleted, trying next...")
+                    continue
+                elif '413' in error_str or 'too large' in error_str or 'payload' in error_str:
+                    logger.warning(f"Enricher: {available_model} returned 413 (prompt too large), trying next...")
+                    continue
+                elif '503' in error_str or 'service unavailable' in error_str or '502' in error_str or 'bad gateway' in error_str or 'over capacity' in error_str:
+                    logger.warning(f"Enricher: {available_model} returned 503/502 (service unavailable), trying next...")
+                    continue
+                elif 'timeout' in error_str or 'timed out' in error_str or 'connection' in error_str:
+                    logger.warning(f"Enricher: {available_model} connection error, trying next...")
                     continue
                 else:
                     raise
@@ -148,6 +172,21 @@ class LeadEnricher:
             if website:
                 parsed = urlparse(website if website.startswith('http') else f"https://{website}")
                 return parsed.netloc or parsed.path.split('/')[0]
+        
+        # FALLBACK: Try to derive domain from company name
+        # e.g., "Acme Corp" → "acmecorp.com", "DataVault" → "datavault.com"
+        import re
+        company = lead.get('company') or lead.get('current_employer') or ''
+        if raw_data:
+            company = company or raw_data.get('current_employer', '')
+        if company:
+            # Clean company name: remove Inc, LLC, Ltd, Corp, etc. and special chars
+            clean = re.sub(r'\b(inc|llc|ltd|corp|co|company|group|technologies|tech|solutions|labs?|studio|ventures|consulting)\b', '', company.lower())
+            clean = re.sub(r'[^a-z0-9]', '', clean).strip()
+            if clean and len(clean) >= 3:
+                guessed_domain = f"{clean}.com"
+                logger.info(f"Guessed domain '{guessed_domain}' from company name '{company}'")
+                return guessed_domain
         
         return None
     

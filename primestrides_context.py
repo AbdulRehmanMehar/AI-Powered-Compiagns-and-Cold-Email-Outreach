@@ -131,7 +131,7 @@ CASE_STUDIES = {
         "result_short": "HIPAA-compliant launch in 8 weeks",
         "result_variations": [
             "full HIPAA compliance in 8 weeks (others quoted 6 months)",
-            "launched HIPAA-compliant in 2 months flat",
+            "launched HIPAA-compliant in just 8 weeks (others quoted 6 months)",
             "went from zero to HIPAA-certified production in 8 weeks",
         ],
         "quote": "Other agencies said 6 months minimum for HIPAA. They did it in 8 weeks.",
@@ -149,7 +149,7 @@ CASE_STUDIES = {
         "result_variations": [
             "cut site inspection time 60% across 40+ job sites",
             "went from day-old data to real-time sync in 10 weeks",
-            "40+ sites now syncing in real-time, 60% faster inspections",
+            "40+ sites now syncing in real-time, 60% faster inspections in 10 weeks",
         ],
         "quote": "Finally software that works when there's no cell signal.",
         "person": "VP Operations",

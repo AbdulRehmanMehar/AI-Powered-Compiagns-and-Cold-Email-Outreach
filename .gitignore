@@ -1,2 +1,7 @@
 venv
 .env
+stack.env
+.env.*
+!.env.example
+_coldemails*
+*.log

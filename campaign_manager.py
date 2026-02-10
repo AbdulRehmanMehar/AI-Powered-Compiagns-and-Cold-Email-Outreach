@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import time
 import random
 import logging
+from bson import ObjectId
 
 from database import Lead, Email, Campaign, DoNotContact, emails_collection, leads_collection
 from rocketreach_client import RocketReachClient
@@ -138,8 +139,12 @@ class CampaignManager:
         
         # Find leads without sent emails - OLDEST FIRST (FIFO)
         # Only include leads created after cutoff date
+        # Exclude leads already marked as invalid (bounced, failed verification, RocketReach invalid)
         pending_leads = []
-        query = {"created_at": {"$gte": cutoff_date}}
+        query = {
+            "created_at": {"$gte": cutoff_date},
+            "email_invalid": {"$ne": True}
+        }
         
         for lead in leads_collection.find(query).sort("created_at", 1).limit(max_leads * 3):
             lead_id = str(lead["_id"])
@@ -599,7 +604,6 @@ class CampaignManager:
             campaign = None
             campaign_context = {}
             # Create a temporary campaign for tracking purposes
-            from bson import ObjectId
             temp_campaign_id = str(ObjectId())
             campaign_id = temp_campaign_id
             print(f"   📝 Created temporary campaign ID for orphan leads: {campaign_id[:8]}...")
@@ -666,21 +670,21 @@ class CampaignManager:
                 email_is_invalid = False
                 for e in rr_emails:
                     if isinstance(e, dict) and e.get("email") == lead_email:
-                        smtp_valid = e.get("smtp_valid", "").lower()
+                        smtp_valid = (e.get("smtp_valid") or "").lower()
                         grade = e.get("grade", "")
                         if smtp_valid == "invalid" or grade == "F":
                             print(f"⛔ Skipping {lead_email} - RocketReach marked INVALID (smtp_valid={smtp_valid}, grade={grade})")
                             email_is_invalid = True
                             results["skipped"] += 1
                             results["skipped_invalid"] = results.get("skipped_invalid", 0) + 1
+                            # Mark in DB so this lead is never re-checked
+                            Lead.mark_invalid_email(lead_id, f"RocketReach INVALID (smtp_valid={smtp_valid}, grade={grade})")
                             break
                 if email_is_invalid:
                     continue
                 
                 # BOUNCE CHECK: Skip leads that have bounced before (from any campaign)
-                from database import emails_collection as ec_bounce_check
-                from bson import ObjectId
-                bounced_email = ec_bounce_check.find_one({
+                bounced_email = emails_collection.find_one({
                     'lead_id': ObjectId(lead_id),
                     'status': 'bounced'
                 })
@@ -759,6 +763,13 @@ class CampaignManager:
                     icp_score=icp_score,
                     icp_reasons=icp_classification.get("icp_reasons", [])
                 )
+                
+                # GATE: Skip non-ICP leads to save API quota and protect sender reputation
+                if not is_icp:
+                    print(f"   ⏭️ Skipping non-ICP lead (score {icp_score} < 0.5 threshold)")
+                    results["skipped"] += 1
+                    results["skipped_non_icp"] = results.get("skipped_non_icp", 0) + 1
+                    continue
                 
                 # Generate personalized email
                 print(f"📧 Generating email for {lead['full_name']} ({lead['email']})...")
@@ -848,8 +859,6 @@ class CampaignManager:
                             results["skipped_limit"] += 1
                             # Don't mark as failed - we'll retry tomorrow
                             # Delete the pending email record
-                            from database import emails_collection
-                            from bson import ObjectId
                             emails_collection.delete_one({"_id": ObjectId(email_id)})
                             break  # Stop the campaign for today
                         
@@ -857,8 +866,6 @@ class CampaignManager:
                             print(f"   ⏸️ Outside sending hours - stopping campaign")
                             results["skipped_time"] += 1
                             # Delete the pending email record
-                            from database import emails_collection
-                            from bson import ObjectId
                             emails_collection.delete_one({"_id": ObjectId(email_id)})
                             break  # Stop the campaign
                         
@@ -958,9 +965,15 @@ class CampaignManager:
         
         print(f"Found {len(pending_followups)} leads needing follow-up")
         
-        # Note: No upfront connect() check needed - send_email() handles connections
-        # per-email with automatic rotation. This prevents false failures when one
-        # account temporarily fails but others are available.
+        # CLEANUP: Delete orphaned pending follow-up records (created but never sent)
+        # These accumulate when send_email fails without proper cleanup
+        orphaned = emails_collection.delete_many({
+            "status": Email.STATUS_PENDING,
+            "email_type": {"$regex": "followup"},
+            "created_at": {"$lt": datetime.utcnow() - timedelta(hours=1)}
+        })
+        if orphaned.deleted_count > 0:
+            print(f"   🧹 Cleaned {orphaned.deleted_count} orphaned follow-up records")
         
         try:
             for followup_data in pending_followups:
@@ -980,9 +993,7 @@ class CampaignManager:
                     continue
                 
                 # BOUNCE CHECK: Skip leads that have bounced before (even if inconclusive in RR)
-                from database import emails_collection as ec_bounce_check
-                from bson import ObjectId
-                bounced_email = ec_bounce_check.find_one({
+                bounced_email = emails_collection.find_one({
                     'lead_id': ObjectId(lead_id),
                     'status': 'bounced'
                 })
@@ -997,7 +1008,7 @@ class CampaignManager:
                 email_is_invalid = False
                 for e in rr_emails:
                     if isinstance(e, dict) and e.get("email") == lead_email:
-                        smtp_valid = e.get("smtp_valid", "").lower()
+                        smtp_valid = (e.get("smtp_valid") or "").lower()
                         grade = e.get("grade", "")
                         if smtp_valid == "invalid" or grade == "F":
                             print(f"⛔ Skipping followup for {lead_email} - RocketReach marked INVALID")
@@ -1027,8 +1038,10 @@ class CampaignManager:
                     except Exception:
                         pass  # Continue without enrichment
                 
-                # Get previous emails for context
-                previous_emails = Email.get_by_lead_and_campaign(lead_id, campaign_id)
+                # Get previous emails for context - ONLY count SENT emails for follow-up number
+                # (pending/failed records should NOT inflate the count)
+                all_emails = Email.get_by_lead_and_campaign(lead_id, campaign_id)
+                previous_emails = [e for e in all_emails if e.get('status') == Email.STATUS_SENT]
                 previous_content = [
                     {"subject": e["subject"], "body": e["body"]}
                     for e in previous_emails
@@ -1100,6 +1113,7 @@ class CampaignManager:
                             print(f"  → Threading: replying to {in_reply_to[:30]}...")
                     
                     # Send the email (uses original sender if found, otherwise rotates)
+                    print(f"  → Sending follow-up to {lead['email']}...")
                     result = self.email_sender.send_email(
                         to_email=lead["email"],
                         subject=email_content["subject"],
@@ -1125,25 +1139,22 @@ class CampaignManager:
                             "status": "sent",
                             "from_email": result.get("from_email")
                         })
-                        # No delay needed - per-account cooldown handles rate limiting
+                        print(f"  ✅ Follow-up #{followup_number} sent to {lead['email']}")
                     else:
                         # Check if we hit limits or time restrictions
                         skip_reason = result.get("skip_reason")
+                        error_msg = result.get("error", "Unknown error")
+                        print(f"  ⚠️ Follow-up send failed: {error_msg} (skip_reason={skip_reason})")
                         
                         if skip_reason == "limit":
                             print(f"   🛑 Daily limit reached - stopping follow-ups for today")
                             results["skipped_limit"] = results.get("skipped_limit", 0) + 1
-                            # Delete the pending email record
-                            from database import emails_collection
-                            from bson import ObjectId
                             emails_collection.delete_one({"_id": ObjectId(email_id)})
                             break
                         
                         elif skip_reason == "time":
                             print(f"   ⏸️ Outside sending hours - stopping follow-ups")
                             results["skipped_time"] = results.get("skipped_time", 0) + 1
-                            from database import emails_collection
-                            from bson import ObjectId
                             emails_collection.delete_one({"_id": ObjectId(email_id)})
                             break
                         
@@ -1151,18 +1162,27 @@ class CampaignManager:
                             # All accounts in cooldown - wait and retry
                             wait_seconds = result.get("wait_seconds", 60)
                             print(f"   ⏳ All accounts in cooldown, waiting {wait_seconds // 60}m {wait_seconds % 60}s...")
+                            # Delete the pending record - will be recreated on retry
+                            emails_collection.delete_one({"_id": ObjectId(email_id)})
                             time.sleep(wait_seconds + 5)
                             continue  # Retry this lead
                         
                         else:
-                            Email.mark_failed(email_id, result.get("error", "Unknown error"))
+                            # Non-recoverable failure - delete the pending record to prevent orphans
+                            print(f"   ❌ Non-recoverable: {error_msg}")
+                            emails_collection.delete_one({"_id": ObjectId(email_id)})
                             results["failed"] += 1
                             results["details"].append({
                                 "lead_email": lead["email"],
                                 "followup_number": followup_number,
                                 "status": "failed",
-                                "error": result.get("error")
+                                "error": error_msg
                             })
+        
+        except Exception as e:
+            print(f"   ❌ Exception in follow-up processing: {e}")
+            import traceback
+            traceback.print_exc()
         
         finally:
             if not dry_run:

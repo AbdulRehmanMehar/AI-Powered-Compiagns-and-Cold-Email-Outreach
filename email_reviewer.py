@@ -185,6 +185,11 @@ BANNED_PHRASES = [
     "growing fast is tough",
     "growing fast is hard",
     "funding is a challenge",
+    # NEW: Overused AI patterns per LeadGenJay
+    "sound familiar?",         # Every AI uses this
+    "you're probably",         # Generic assumption
+    "most teams struggle",     # Templated garbage
+    "you're likely",           # Another assumption
     
     # Follow-up phrases in initial emails
     "touching base",
@@ -376,8 +381,8 @@ class EmailReviewer:
         Call the LLM with automatic Groq model fallback (same as EmailGenerator).
         Returns the response content as string.
         """
-        # For OpenAI, just make the call directly
-        if self.provider != 'groq' or not self.rate_limiter:
+        # For OpenAI or Ollama, just make the call directly
+        if self.provider in ['openai', 'ollama']:
             kwargs = {
                 "model": self.model,
                 "messages": [
@@ -480,6 +485,12 @@ class EmailReviewer:
                 # If it's a 413 "Request Entity Too Large" error, skip this model (prompt too big for it)
                 elif '413' in error_str or 'too large' in error_str or 'payload' in error_str:
                     print(f"   ⚠️ Reviewer: {available_model} returned 413 (prompt too large), trying next model...")
+                    continue
+                elif '503' in error_str or 'service unavailable' in error_str or '502' in error_str or 'bad gateway' in error_str or 'over capacity' in error_str:
+                    print(f"   ⚠️ Reviewer: {available_model} returned 503/502 (service unavailable), trying next model...")
+                    continue
+                elif 'timeout' in error_str or 'timed out' in error_str or 'connection' in error_str:
+                    print(f"   ⚠️ Reviewer: {available_model} connection error, trying next model...")
                     continue
                 else:
                     raise

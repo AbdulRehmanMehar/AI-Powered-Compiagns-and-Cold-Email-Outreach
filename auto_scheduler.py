@@ -191,7 +191,9 @@ class AutoScheduler:
                 print(f"   ICP Template: {icp_template}")
             
         except Exception as e:
+            import traceback
             print(f"❌ Scheduled campaign failed: {e}")
+            traceback.print_exc()
     
     def check_replies_task(self):
         """Task to check for replies across all accounts"""
@@ -276,6 +278,120 @@ class AutoScheduler:
             except Exception as e:
                 print(f"   Error: {e}")
     
+    def check_system_health(self):
+        """
+        Check system health and alert on issues.
+        
+        Detects:
+        - No emails sent for 4+ hours (silent failure)
+        - No campaigns created for 24+ hours
+        - Leads stuck in pending status for 24+ hours
+        - Circuit breaker open (API issues)
+        
+        This prevents the system from running idle without anyone noticing.
+        """
+        from database import Email, Lead, emails_collection, leads_collection
+        from email_generator import get_circuit_breaker
+        
+        print(f"\n[{get_target_time_str()}] 🏥 System Health Check...")
+        issues = []
+        warnings = []
+        
+        # Check 1: Last email sent time
+        try:
+            last_email = emails_collection.find_one(
+                {"status": {"$in": [Email.STATUS_SENT, Email.STATUS_REPLIED]}},
+                sort=[("sent_at", -1)]
+            )
+            
+            if last_email and last_email.get("sent_at"):
+                hours_since_email = (datetime.utcnow() - last_email["sent_at"]).total_seconds() / 3600
+                
+                if hours_since_email > 24:
+                    issues.append(f"🚨 CRITICAL: No emails sent in {int(hours_since_email)} hours")
+                elif hours_since_email > 4:
+                    warnings.append(f"⚠️  No emails sent in {int(hours_since_email)} hours")
+            else:
+                issues.append("🚨 CRITICAL: No emails found in database")
+        except Exception as e:
+            warnings.append(f"⚠️  Could not check last email: {e}")
+        
+        # Check 2: Last campaign created
+        try:
+            last_campaign = campaigns_collection.find_one(
+                {},
+                sort=[("created_at", -1)]
+            )
+            
+            if last_campaign and last_campaign.get("created_at"):
+                hours_since_campaign = (datetime.utcnow() - last_campaign["created_at"]).total_seconds() / 3600
+                
+                if hours_since_campaign > 48:
+                    issues.append(f"🚨 No campaigns created in {int(hours_since_campaign)} hours")
+                elif hours_since_campaign > 24:
+                    warnings.append(f"⚠️  No campaigns created in {int(hours_since_campaign)} hours")
+        except Exception as e:
+            warnings.append(f"⚠️  Could not check last campaign: {e}")
+        
+        # Check 3: Stuck pending leads
+        try:
+            cutoff_time = datetime.utcnow() - timedelta(hours=24)
+            stuck_leads = leads_collection.count_documents({
+                "status": "pending",
+                "created_at": {"$lt": cutoff_time}
+            })
+            
+            if stuck_leads > 100:
+                issues.append(f"🚨 {stuck_leads} leads stuck in 'pending' for 24+ hours")
+            elif stuck_leads > 50:
+                warnings.append(f"⚠️  {stuck_leads} leads stuck in 'pending' for 24+ hours")
+        except Exception as e:
+            warnings.append(f"⚠️  Could not check stuck leads: {e}")
+        
+        # Check 4: Circuit breaker state
+        try:
+            breaker = get_circuit_breaker()
+            if breaker.state == "OPEN":
+                issues.append(f"🚨 Circuit breaker OPEN - API calls blocked (failures: {breaker.failures})")
+            elif breaker.state == "HALF_OPEN":
+                warnings.append(f"⚠️  Circuit breaker HALF_OPEN - testing recovery")
+            elif breaker.failures > 0:
+                warnings.append(f"⚠️  Circuit breaker has {breaker.failures} recent failures")
+        except Exception as e:
+            warnings.append(f"⚠️  Could not check circuit breaker: {e}")
+        
+        # Check 5: Draft campaigns waiting to send
+        try:
+            waiting_drafts = campaigns_collection.count_documents({
+                "status": Campaign.STATUS_DRAFT,
+                "stats.total_leads": {"$gt": 0},
+                "stats.emails_sent": 0
+            })
+            
+            if waiting_drafts > 5:
+                warnings.append(f"⚠️  {waiting_drafts} draft campaigns waiting to send")
+        except Exception as e:
+            warnings.append(f"⚠️  Could not check draft campaigns: {e}")
+        
+        # Report findings
+        if not issues and not warnings:
+            print("   ✅ All systems healthy")
+            return True
+        
+        if warnings:
+            print("\n   Warnings:")
+            for warning in warnings:
+                print(f"   {warning}")
+        
+        if issues:
+            print("\n   🚨 CRITICAL ISSUES:")
+            for issue in issues:
+                print(f"   {issue}")
+            print("\n   ACTION REQUIRED: System may be degraded or idle!")
+            return False
+        
+        return True
+    
     def _run_missed_campaigns(self):
         """Run any campaigns that were scheduled earlier today but missed"""
         now = get_target_time()
@@ -353,6 +469,7 @@ class AutoScheduler:
         schedule.every(check_replies_interval_hours).hours.do(self.check_replies_task)
         schedule.every(followup_check_interval_hours).hours.do(self.send_followups_task)
         schedule.every(initial_emails_interval_hours).hours.do(self.send_initial_emails_task)
+        schedule.every().hour.do(self.check_system_health)  # Health monitoring every hour
         
         # Schedule campaign creation tasks
         # Note: schedule library uses server local time, so we convert from target TZ
@@ -386,6 +503,12 @@ class AutoScheduler:
         # Run any missed campaigns from earlier today
         self._run_missed_campaigns()
         
+        # Run initial health check
+        print("\n" + "=" * 60)
+        print("Running initial health check...")
+        print("=" * 60)
+        self.check_system_health()
+        
         self._running = True
         
         while self._running:
@@ -396,6 +519,12 @@ class AutoScheduler:
                 print("\n\n⏹️  Scheduler stopped")
                 self._running = False
                 break
+            except Exception as e:
+                # Catch ALL other exceptions so the scheduler never crashes
+                print(f"\n❌ Scheduler loop error (will retry in 60s): {e}")
+                import traceback
+                traceback.print_exc()
+                time.sleep(60)  # Wait before retrying
     
     def stop(self):
         """Stop the scheduler"""

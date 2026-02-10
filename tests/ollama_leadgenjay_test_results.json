@@ -1,0 +1,160 @@
+[
+  {
+    "lead": {
+      "first_name": "Sarah",
+      "email": "sarah.chen@techstartup.io",
+      "company": "DataFlow AI",
+      "company_name": "DataFlow AI",
+      "title": "CTO",
+      "industry": "Artificial Intelligence",
+      "description": "Early-stage AI startup building ML infrastructure"
+    },
+    "email": {
+      "subject": "had a thought",
+      "body": "hey sarah, been meaning to ask you something.\n\nis dataflow ai's dev team spending more time on maintenance than new features right now? seems to be the pattern with a lot of artificial intelligence companies scaling up. we helped an hr startup reduce hiring workflow time by 43% in 8 weeks. crazy or worth exploring?\n\nabdul",
+      "research": {
+        "specific_observation": "none",
+        "likely_pain_point": "Based on their stage in the AI industry and role as CTO, they likely face challenges with integrating diverse data sources into a unified platform.",
+        "why_relevant_to_us": "PrimeStrides can offer solutions to streamline data integration and enhance the efficiency of their AI models by leveraging advanced data processing technologies.",
+        "conversation_hook": "Hi Sarah, I understand you're at the forefront of AI innovation. At PrimeStrides, we've helped companies like yours overcome challenges with complex data integrations. Could we discuss how our platform might benefit DataFlow AI?",
+        "confidence": "low",
+        "source": "llm_research"
+      },
+      "case_study_used": "an HR tech startup"
+    },
+    "evaluation": {
+      "score": 100,
+      "max_score": 100,
+      "percentage": 100.0,
+      "passes": [
+        "\u2705 Perfect word count: 56 words (ideal: 50-60)",
+        "\u2705 Subject length good: 3 words",
+        "\u2705 No banned phrases in subject",
+        "\u2705 First line passes (no banned phrases)",
+        "\u2705 First line creates curiosity (doesn't reveal pitch)",
+        "\u2705 No em dashes (\u2014)",
+        "\u2705 No banned corporate jargon",
+        "\u2705 Mentions company name: DataFlow AI",
+        "\u2705 ONE focused pain point",
+        "\u2705 Has soft CTA (no hard sell)",
+        "\u2705 Includes specific numbers/metrics"
+      ],
+      "warnings": [],
+      "failures": [],
+      "details": {
+        "word_count": 56,
+        "subject": "had a thought",
+        "subject_word_count": 3,
+        "first_line": "hey sarah, been meaning to ask you something."
+      }
+    },
+    "generation_time": 57.912833,
+    "timestamp": "2026-02-10T04:59:02.174861"
+  },
+  {
+    "lead": {
+      "first_name": "Mike",
+      "email": "mike@healthtech.com",
+      "company": "MediSync",
+      "company_name": "MediSync",
+      "title": "VP Engineering",
+      "industry": "Healthcare Technology",
+      "description": "Healthcare SaaS handling patient data"
+    },
+    "email": {
+      "subject": "quick one",
+      "body": "hey mike, quick one.\n\nis mediSync's team hitting a wall trying to ship faster without adding headcount? it seems everyone is dealing with this right now.\n\nwe helped a healthtech startup went from zero to HIPAA-certified production in 8 weeks.\nworth a quick chat?",
+      "research": {
+        "specific_observation": "none",
+        "likely_pain_point": "scaling their technology infrastructure to handle growing patient volumes and data demands.",
+        "why_relevant_to_us": "PrimeStrides can offer scalable cloud solutions that help MediSync manage growth without compromising performance or security.",
+        "conversation_hook": "Hi Mike, I've been following MediSync's progress in the healthcare tech space and am impressed by your team's work. Given the increasing demand for your services, I wanted to share how PrimeStrides has helped similar companies scale their technology infrastructure effectively.",
+        "confidence": "low",
+        "source": "llm_research"
+      },
+      "case_study_used": "a HIPAA-compliant health startup"
+    },
+    "evaluation": {
+      "score": 100,
+      "max_score": 100,
+      "percentage": 100.0,
+      "passes": [
+        "\u2705 Subject length good: 2 words",
+        "\u2705 No banned phrases in subject",
+        "\u2705 First line passes (no banned phrases)",
+        "\u2705 First line creates curiosity (doesn't reveal pitch)",
+        "\u2705 No em dashes (\u2014)",
+        "\u2705 No banned corporate jargon",
+        "\u2705 Mentions company name: MediSync",
+        "\u2705 ONE focused pain point",
+        "\u2705 Has soft CTA (no hard sell)",
+        "\u2705 Includes specific numbers/metrics"
+      ],
+      "warnings": [
+        "\u26a0\ufe0f  Word count OK but not ideal: 44 words"
+      ],
+      "failures": [],
+      "details": {
+        "word_count": 44,
+        "subject": "quick one",
+        "subject_word_count": 2,
+        "first_line": "hey mike, quick one."
+      }
+    },
+    "generation_time": 52.503328,
+    "timestamp": "2026-02-10T04:59:02.174891"
+  },
+  {
+    "lead": {
+      "first_name": "Alex",
+      "email": "alex@constructech.com",
+      "company": "BuildTrack",
+      "company_name": "BuildTrack",
+      "title": "Founder & CEO",
+      "industry": "Construction Technology",
+      "description": "Construction management platform"
+    },
+    "email": {
+      "subject": "quick question",
+      "body": "hey alex, random one.\n\ncurious if buildtrack is handling the founder dilemma of speed vs quality. it never gets easier, especially at your stage.\n\nwe helped a construction tech team go from day-old data to real-time sync in 10 weeks.\nworth a quick chat?\nabdul",
+      "research": {
+        "specific_observation": "none",
+        "likely_pain_point": "Based on their stage in the construction technology industry, a likely pain point is managing project timelines and costs efficiently.",
+        "why_relevant_to_us": "PrimeStrides can help BuildTrack manage these challenges by providing real-time data analytics and project management tools to optimize workflow and reduce delays.",
+        "conversation_hook": "Alex, I understand that managing multiple construction projects can be quite complex. How do you currently handle the challenge of ensuring timely completion and staying within budget?",
+        "confidence": "low",
+        "source": "llm_research"
+      },
+      "case_study_used": "a construction tech company"
+    },
+    "evaluation": {
+      "score": 100,
+      "max_score": 100,
+      "percentage": 100.0,
+      "passes": [
+        "\u2705 Subject length good: 2 words",
+        "\u2705 No banned phrases in subject",
+        "\u2705 First line passes (no banned phrases)",
+        "\u2705 First line creates curiosity (doesn't reveal pitch)",
+        "\u2705 No em dashes (\u2014)",
+        "\u2705 No banned corporate jargon",
+        "\u2705 Mentions company name: BuildTrack",
+        "\u2705 ONE focused pain point",
+        "\u2705 Has soft CTA (no hard sell)",
+        "\u2705 Includes specific numbers/metrics"
+      ],
+      "warnings": [
+        "\u26a0\ufe0f  Word count OK but not ideal: 45 words"
+      ],
+      "failures": [],
+      "details": {
+        "word_count": 45,
+        "subject": "quick question",
+        "subject_word_count": 2,
+        "first_line": "hey alex, random one."
+      }
+    },
+    "generation_time": 49.802001,
+    "timestamp": "2026-02-10T04:59:02.174898"
+  }
+]

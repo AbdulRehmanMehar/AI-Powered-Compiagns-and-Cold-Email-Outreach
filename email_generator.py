@@ -30,6 +30,114 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# CIRCUIT BREAKER - PREVENT INFINITE RETRY LOOPS
+# =============================================================================
+
+class CircuitBreakerOpen(Exception):
+    """Raised when circuit breaker is open (too many failures)"""
+    pass
+
+
+class APICircuitBreaker:
+    """
+    Circuit breaker to prevent infinite retry loops when API is down.
+    
+    States:
+    - CLOSED: Normal operation, requests pass through
+    - OPEN: Too many failures, block all requests for timeout period
+    - HALF_OPEN: Testing if service recovered
+    
+    This prevents burning through API quota when service is degraded.
+    """
+    
+    def __init__(self, failure_threshold: int = 5, timeout: int = 300):
+        """
+        Args:
+            failure_threshold: Number of consecutive failures before opening circuit
+            timeout: Seconds to wait before attempting recovery (default 5 min)
+        """
+        self.failure_threshold = failure_threshold
+        self.timeout = timeout
+        self.failures = 0
+        self.last_failure_time = None
+        self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
+        self.success_count = 0  # For half-open state
+    
+    def call(self, func, *args, **kwargs):
+        """
+        Execute function with circuit breaker protection.
+        
+        Raises:
+            CircuitBreakerOpen: If circuit is open (too many failures)
+        """
+        # Check if circuit should transition from OPEN to HALF_OPEN
+        if self.state == "OPEN":
+            time_since_failure = time.time() - (self.last_failure_time or 0)
+            if time_since_failure > self.timeout:
+                logger.info(f"🔄 Circuit breaker transitioning to HALF_OPEN (testing recovery)")
+                self.state = "HALF_OPEN"
+                self.success_count = 0
+            else:
+                wait_time = int(self.timeout - time_since_failure)
+                raise CircuitBreakerOpen(
+                    f"Circuit breaker OPEN - too many API failures. "
+                    f"Retry in {wait_time}s"
+                )
+        
+        # Execute the function
+        try:
+            result = func(*args, **kwargs)
+            
+            # Success! Handle state transitions
+            if self.state == "HALF_OPEN":
+                self.success_count += 1
+                if self.success_count >= 2:  # Need 2 successes to close
+                    logger.info(f"✅ Circuit breaker CLOSED (service recovered)")
+                    self.state = "CLOSED"
+                    self.failures = 0
+            elif self.state == "CLOSED":
+                # Reset failure count on success
+                self.failures = 0
+            
+            return result
+            
+        except Exception as e:
+            # Failure! Increment counter and potentially open circuit
+            self.failures += 1
+            self.last_failure_time = time.time()
+            
+            if self.state == "HALF_OPEN":
+                # Failed during test - back to OPEN
+                logger.warning(f"🔴 Circuit breaker back to OPEN (recovery test failed)")
+                self.state = "OPEN"
+            elif self.failures >= self.failure_threshold:
+                # Too many failures - open the circuit
+                logger.error(
+                    f"🔴 Circuit breaker OPEN after {self.failures} consecutive failures. "
+                    f"Blocking API calls for {self.timeout}s to prevent quota waste."
+                )
+                self.state = "OPEN"
+            
+            raise
+    
+    def reset(self):
+        """Manually reset the circuit breaker"""
+        self.failures = 0
+        self.state = "CLOSED"
+        self.success_count = 0
+        logger.info("♻️  Circuit breaker manually reset")
+
+
+# Global circuit breaker instance
+_circuit_breaker = APICircuitBreaker(failure_threshold=5, timeout=300)
+
+
+def get_circuit_breaker() -> APICircuitBreaker:
+    """Get the global circuit breaker instance"""
+    return _circuit_breaker
+
+
+# =============================================================================
 # HUMANIZE EMAIL - STRIP AI TELLS
 # =============================================================================
 
@@ -688,26 +796,40 @@ EXAMPLES of BAD pain points (too generic):
 Return ONLY the pain point statement, nothing else."""
 
     try:
-        rate_limiter = get_rate_limiter()
-        available_model = rate_limiter.get_best_available_model()
+        # Use current LLM provider (respects config.LLM_PROVIDER)
+        client, model, provider = get_llm_client()
         
-        if not available_model:
-            # Fallback to a sensible default
-            return "your best engineers are stuck maintaining instead of building the next thing"
-        
-        client, _, provider = get_llm_client('groq', available_model)
-        
-        response = client.chat.completions.create(
-            model=available_model,
-            messages=[
-                {"role": "system", "content": "You write specific, relatable pain points for cold emails. Be concise and insightful."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=100
-        )
-        
-        rate_limiter.record_request(available_model, response.usage.total_tokens if response.usage else 100)
+        # For Groq, use rate limiter and model rotation
+        if provider == 'groq':
+            rate_limiter = get_rate_limiter()
+            available_model = rate_limiter.get_best_available_model()
+            
+            if not available_model:
+                # Fallback to a sensible default
+                return "your best engineers are stuck maintaining instead of building the next thing"
+            
+            response = client.chat.completions.create(
+                model=available_model,
+                messages=[
+                    {"role": "system", "content": "You write specific, relatable pain points for cold emails. Be concise and insightful."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=100
+            )
+            
+            rate_limiter.record_request(available_model, response.usage.total_tokens if response.usage else 100)
+        else:
+            # For Ollama/OpenAI, use directly without rate limiting
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You write specific, relatable pain points for cold emails. Be concise and insightful."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=100
+            )
         
         pain_point = response.choices[0].message.content.strip()
         # Clean up any quotes or extra formatting
@@ -731,6 +853,13 @@ def get_llm_client(provider: str = None, model: str = None):
             model = getattr(config, 'GROQ_MODEL', 'llama-3.3-70b-versatile')
         # Disable SDK auto-retry - we handle retries ourselves with model rotation
         return Groq(api_key=config.GROQ_API_KEY, max_retries=0), model, 'groq'
+    elif provider == 'ollama':
+        from openai import OpenAI
+        if model is None:
+            model = getattr(config, 'OLLAMA_MODEL', 'qwen2.5:7b')
+        base_url = getattr(config, 'OLLAMA_BASE_URL', 'http://localhost:11434')
+        # Ollama is OpenAI-compatible - use /v1 endpoint
+        return OpenAI(base_url=f"{base_url}/v1", api_key="ollama"), model, 'ollama'
     else:
         from openai import OpenAI
         if model is None:
@@ -763,7 +892,12 @@ class EmailGenerator:
         self.case_studies = CASE_STUDIES
         self.rate_limiter = get_rate_limiter() if self.provider == 'groq' else None
         
-        # Show initialization message with available Groq capacity
+        # Separate Ollama client for follow-ups (free, no rate limits)
+        self._followup_client = None
+        self._followup_model = getattr(config, 'OLLAMA_MODEL', 'qwen2.5:7b')
+        self._followup_base_url = getattr(config, 'OLLAMA_BASE_URL', 'http://192.168.1.9:11434')
+        
+        # Show initialization message with available capacity
         if self.provider == 'groq':
             stats = self.rate_limiter.get_usage_stats()
             print(f"📝 Email generator using: GROQ (aggressive fallback enabled)")
@@ -775,17 +909,22 @@ class EmailGenerator:
                 pct = s.get('percent_used', 0)
                 status = "✅" if pct < 80 else "⚠️" if pct < 95 else "❌"
                 print(f"      {status} {model}: {used:,}/{limit:,} ({pct}%)")
+        elif self.provider == 'ollama':
+            base_url = getattr(config, 'OLLAMA_BASE_URL', 'http://localhost:11434')
+            print(f"📝 Email generator using: OLLAMA ({self.model})")
+            print(f"   Server: {base_url}")
+            print(f"   ✅ No rate limits - unlimited generation!")
         else:
             print(f"📝 Email generator using: {self.provider.upper()} ({self.model})")
     
     def _call_llm(self, system_prompt: str, user_prompt: str, temperature: float = 0.7, json_mode: bool = False) -> str:
         """
-        Call the LLM (Groq or OpenAI) with rate limiting and automatic Groq model fallback.
+        Call the LLM (Groq, OpenAI, or Ollama) with rate limiting and automatic Groq model fallback.
         AGGRESSIVE: Automatically tries next model in chain when one hits rate limits.
         Returns the response content as string.
         """
-        # For OpenAI, just make the call directly
-        if self.provider != 'groq':
+        # For OpenAI or Ollama, just make the call directly
+        if self.provider in ['openai', 'ollama']:
             return self._make_llm_call(self.client, self.model, system_prompt, user_prompt, temperature, json_mode)
         
         # For Groq, use aggressive fallback - try each model in chain until one works
@@ -840,6 +979,14 @@ class EmailGenerator:
                     # Prompt too large for this model, try next
                     print(f"   ⚠️ {available_model} returned 413 (prompt too large), trying next model...")
                     continue
+                elif '503' in error_str or 'service unavailable' in error_str or '502' in error_str or 'bad gateway' in error_str or 'over capacity' in error_str:
+                    # Service temporarily unavailable, try next model
+                    print(f"   ⚠️ {available_model} returned 503/502 (service unavailable), trying next model...")
+                    continue
+                elif 'timeout' in error_str or 'timed out' in error_str or 'connection' in error_str:
+                    # Connection issues, try next model
+                    print(f"   ⚠️ {available_model} connection error, trying next model...")
+                    continue
                 else:
                     # Non-rate-limit error, raise it
                     raise
@@ -855,6 +1002,12 @@ class EmailGenerator:
             ],
             "temperature": temperature,
         }
+        
+        # Qwen-specific parameters for better output quality (works with Ollama)
+        # These parameters help prevent ultra-short responses and improve instruction following
+        if 'qwen' in model.lower() or (client.__class__.__name__ == 'OpenAI' and hasattr(client, 'base_url') and client.base_url and 'ollama' in str(client.base_url)):
+            kwargs["top_p"] = 0.9      # Qwen works best with 0.8-0.95
+            kwargs["max_tokens"] = 500  # Ensure space for 75-word emails
         
         # JSON mode - Groq supports this for Llama 3.3+
         if json_mode:
@@ -885,6 +1038,44 @@ class EmailGenerator:
             self.rate_limiter.record_request(model, tokens_used)
         
         return content
+    
+    def _call_ollama_for_followup(self, system_prompt: str, user_prompt: str, temperature: float = 0.85) -> str:
+        """
+        Call Ollama/Qwen specifically for follow-up generation.
+        Separate from _call_llm to keep initial email system untouched.
+        Free, no rate limits, runs locally.
+        """
+        if self._followup_client is None:
+            from openai import OpenAI
+            self._followup_client = OpenAI(
+                base_url=f"{self._followup_base_url}/v1",
+                api_key="ollama"
+            )
+        
+        try:
+            response = self._followup_client.chat.completions.create(
+                model=self._followup_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=temperature,
+                top_p=0.9,
+                max_tokens=400,
+                response_format={"type": "json_object"},
+            )
+            
+            content = response.choices[0].message.content
+            if not content or content.strip() == '':
+                raise ValueError("Ollama returned empty response")
+            
+            # Validate JSON
+            json.loads(content)
+            return content
+            
+        except Exception as e:
+            print(f"   ⚠️ Ollama follow-up call failed: {e}")
+            raise
     
     def research_company(self, lead: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -983,16 +1174,42 @@ Find something SPECIFIC we can reference. If you don't have REAL information, sa
     
     def select_case_study(self, lead: Dict[str, Any], research: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Use AI to select the most relevant case study for this lead.
+        Select the most relevant case study for this lead.
         
-        Instead of brittle keyword matching, let the LLM understand context
-        and pick the case study that will resonate most.
+        STRATEGY: Try keyword matching FIRST (fast & reliable), then AI fallback.
+        This prevents the AI from always defaulting to enterprise_modernization.
         """
         company = lead.get('company') or 'Unknown'
         title = lead.get('title') or ''
         their_space = research.get('their_space') or lead.get('industry') or ''
         what_they_do = research.get('what_they_do') or ''
         pain_guess = research.get('likely_pain_point') or ''
+        
+        # FIRST: Try direct keyword matching (fast, reliable, no AI needed)
+        context_text = f"{their_space} {what_they_do} {company} {pain_guess}".lower()
+        
+        keyword_map = {
+            'healthtech_client': ['health', 'medical', 'hipaa', 'patient', 'clinical', 'hospital', 'pharma', 'medisync', 'healthcare'],
+            'construction_tech': ['construction', 'building', 'field', 'site', 'infrastructure', 'buildtrack', 'architect'],
+            'fintech_client': ['fintech', 'payment', 'banking', 'financial', 'transaction', 'lending', 'insurance'],
+            'hr_tech_ai': ['hr', 'hiring', 'recruit', 'talent', 'applicant', 'job', 'workforce', 'ai', 'ml', 'machine learning', 'artificial intelligence', 'data', 'automation'],
+            'saas_mvp': ['saas', 'mvp', 'startup', 'early-stage', 'seed', 'pre-seed', 'fundrais', 'series a', 'b2b'],
+            'enterprise_modernization': ['enterprise', 'legacy', 'moderniz', 'staffing', 'large company'],
+        }
+        
+        best_match = None
+        best_score = 0
+        for cs_key, keywords in keyword_map.items():
+            score = sum(1 for kw in keywords if kw in context_text)
+            if score > best_score:
+                best_score = score
+                best_match = cs_key
+        
+        if best_match and best_score >= 1:
+            result = self.case_studies[best_match].copy()
+            result['selected_by'] = f'keyword_match ({best_match}, score={best_score})'
+            print(f"   📎 Case study: {best_match} (keyword match, score={best_score})")
+            return result
         
         # Build case study summaries for the AI
         case_study_summaries = []
@@ -1389,47 +1606,49 @@ Be casual and direct - like texting a colleague, not writing a formal email."""
 DO NOT fake observations like "saw you're hiring" or "noticed your growth"."""
         
         # VARIED SUBJECT LINES - LeadGenJay: 2-3 words that a colleague could send
-        # NEVER just "{name}?" - it's overused and boring
+        # NO dashes, NO single words, NO formal language
+        # Must look like it came from a coworker or friend
         subject_templates = [
             "random thought",
-            "quick idea", 
-            "saw something",
+            "quick question",
+            "quick idea",
             "wild idea",
             "quick q",
-            f"{first_name.lower()} - idea",
-            "thought about this",
-            f"re {company.lower().split()[0] if company else 'you'}",
+            "thought of this",
             "random q",
             "hey quick q",
+            "had a thought",
+            "one more thing",
         ]
         suggested_subject = random.choice(subject_templates)
         
-        # CURIOSITY-FIRST OPENERS - LeadGenJay: First line = preview text
-        # Must sound like it could be from a friend, NOT reveal it's a pitch
-        # NEVER start with company observation - that's instant delete
-        # NO EM DASHES (—) - this is the #1 AI tell!
+        # CURIOSITY-FIRST OPENERS - LeadGenJay: First line = PREVIEW TEXT
+        # RULE: Must sound like a FRIEND texting. NO company name. NO pitch hint.
+        # They see this BEFORE opening. If it smells like a pitch, they delete.
+        # NO EM DASHES, NO placeholders, NO company observations.
         curiosity_openers = [
-            f"random question, how's your team handling [specific challenge] these days?",
-            f"been thinking about this. {company} is in an interesting spot right now.",
-            f"quick q for you {first_name}.",
-            f"this might be out of left field.",
-            f"curious about something with {company}.",
-            f"weird timing but had a thought.",
-            f"so I was looking at {company}'s site...",
-            f"hey {first_name}, random one for you.",
+            "had a random thought.",
+            "quick one.",
+            "this might be out of left field.",
+            "weird timing but had a thought.",
+            f"hey {first_name.lower()}, random one for you.",
+            "been meaning to ask you something.",
+            "random one.",
+            "quick q.",
         ]
         suggested_opener = random.choice(curiosity_openers)
         
         # VARIED CTAs - LeadGenJay: ONE soft CTA, but vary them
+        # NO "sound familiar?" - overused AI pattern
         cta_options = [
             "worth a quick chat?",
             "ring any bells?",
-            "sound familiar?",
             "crazy or worth exploring?",
             "am I off base here?",
             "make any sense?",
             "worth 15 mins?",
             "curious if this resonates.",
+            "thoughts?",
         ]
         suggested_cta = random.choice(cta_options)
         
@@ -1450,53 +1669,42 @@ DO NOT fake observations like "saw you're hiring" or "noticed your growth"."""
         # Line 4 = SOFT CTA - "thoughts?" "worth a chat?"
         # =================================================================
         
-        system_prompt = f"""You are LeadGenJay writing a cold email.
+        system_prompt = f"""You write cold emails using LeadGenJay's exact 4-line framework.
 
-You've sent thousands of these. You know what works.
+THE 4 LINES (each separated by a blank line):
 
-**YOUR PHILOSOPHY:**
-- The first line is PREVIEW TEXT. They see it before opening. If it looks like a pitch, they delete without opening.
-- You write like you're texting a friend, not writing a business email.
-- You NEVER say "most teams struggle with X" - that's lazy templated garbage.
-- You poke the bear by asking a QUESTION about how they handle something specific.
-- The whole email flows like ONE conversation, not 4 disconnected lines.
+Line 1 = PREVIEW TEXT (1 short sentence, 5-10 words):
+This is what they see BEFORE opening. Must sound like a friend texting.
+NO company names. NO pitch hints. NO "I noticed" or "I saw".
+Just casual curiosity like: "had a random thought." or "quick one."
 
-**YOUR 4-LINE STRUCTURE:**
+Line 2 = POKE THE BEAR (2-3 sentences, 25-35 words):
+Now mention "{company}" by name. Ask a QUESTION about a specific pain they face.
+Follow up with one more sentence expanding on the pain.
+This is where you show you understand their world.
 
-LINE 1 - THE PREVIEW TEXT:
-This shows in inbox before they open. Sound like a friend texting.
-GOOD: "hey {first_name.lower()}, random q" / "quick one for you" / "this might be off base"
-BAD: "{company}'s growth caught my eye" / "saw you're doing X" (reveals pitch = instant delete)
+Line 3 = CASE STUDY (1-2 sentences, 15-20 words):
+Share a relevant result with REAL numbers. Use the exact case study provided.
+Don't change the company type or industry. Keep it factual.
 
-LINE 2 - POKE THE BEAR:
-Ask a QUESTION about a UNIVERSAL pain (speed, cost, manual work, hiring) that ANY business faces.
-Make it feel relevant to their world without being too niche.
-GOOD: "are you guys still doing [process] manually or did you automate that?"
-GOOD: "is your team stuck maintaining stuff instead of building new features?"
-GOOD: "how are you handling dev capacity while also [growing/fundraising/scaling]?"
-BAD: "Managing compliance is getting harder" (statement, not question)
-BAD: "most teams struggle with..." (lazy, everyone says this)
+Line 4 = SOFT CTA + SIGN-OFF (2 lines):
+One casual question as CTA. Then "abdul" on the next line.
 
-LINE 3 - CASE STUDY:
-**CRITICAL: USE THE EXACT CASE STUDY I GIVE YOU. DO NOT CHANGE THE COMPANY TYPE.**
-If I say "helped a healthtech startup" - say EXACTLY that, even if the prospect is in pet tech.
-The case study is REAL. Changing it is LYING. Never fabricate.
-Frame it around a UNIVERSAL outcome (speed, cost savings, faster shipping) that resonates with anyone.
-
-LINE 4 - SOFT CTA:
-"thoughts?" / "worth a quick chat?" / "am I way off here?"
-
-**RULES:**
-- Subject: 2-3 lowercase words ("quick q" / "random thought")
-- Body: 35-50 words TOTAL
-- 4 short paragraphs, blank lines between
-- NO em dashes (—), NO corporate jargon (no "streamline", "leverage", "optimize")
-- Contractions always (don't, can't, won't)
-- 6th grade reading level
-- NEVER change or fabricate the case study company type
+RULES:
+- Subject: 2-3 lowercase words, no dashes, no punctuation
+- Body: 45-70 words total. If under 45, add more detail to Line 2.
+- CRITICAL: Separate each section with a BLANK LINE (empty line between sections)
+- Line 1 must NOT mention "{company}" or any company. Pure curiosity only.
+- Line 2 MUST mention "{company}" by name, spelled exactly.
+- NO em dashes. Use commas or periods.
+- NO jargon: streamline, leverage, optimize, solutions, empower, innovative
+- NO stalker phrases: "I noticed", "I saw", "I was looking at", "came across"
+- Contractions always: don't, can't, won't, we've
+- 6th grade reading level, all lowercase
+- Case study: use EXACTLY as provided, don't fabricate or change industry
 {improvement_prompt if improvement_prompt else ""}
 
-Return JSON: {{"subject": "...", "body": "line1\\n\\nline2\\n\\nline3\\n\\nline4"}}"""
+Return JSON: {{"subject": "2-3 word subject", "body": "line1\\n\\nline2\\n\\nline3\\n\\nCTA\\nabdul"}}"""
 
         # Build enrichment context for AI pain point generation
         enrichment_context = {
@@ -1511,36 +1719,88 @@ Return JSON: {{"subject": "...", "body": "line1\\n\\nline2\\n\\nline3\\n\\nline4
         # Use enrichment pain point if available, otherwise use AI-generated one
         actual_pain_point = pain_guess if (has_real_data and pain_guess) else industry_pain_point
         
-        user_prompt = f"""Write a LeadGenJay-style cold email.
+        # Pick a varied pain point question based on title
+        # Each includes a follow-up sentence to hit 50+ word target
+        pain_questions = {
+            'CTO': [
+                f"is {company}'s dev team spending more time on maintenance than new features right now? seems to be the pattern with a lot of {their_space or industry or 'tech'} companies scaling up.",
+                f"curious if {company} is tackling the build-vs-buy decision on infrastructure. it's a tough call when you're moving fast.",
+                f"is {company}'s engineering team stuck putting out fires instead of shipping new stuff? been seeing that a lot lately.",
+            ],
+            'VP Engineering': [
+                f"is {company}'s team hitting a wall trying to ship faster without adding headcount? seems to be the story everywhere right now.",
+                f"curious how {company} is handling tech debt vs feature deadlines. it's usually a pick-one situation that nobody likes.",
+                f"is {company}'s roadmap getting squeezed because the team's stretched? i keep hearing that from engineering leads in {their_space or industry or 'tech'}.",
+            ],
+            'CEO': [
+                f"is {company} at that stage where the tech side can't keep pace with the business? i see that a lot with {their_space or industry or 'tech'} companies growing fast.",
+                f"curious if {company} is feeling the drag from manual processes. it's one of those things that sneaks up when you're focused on growth.",
+                f"is {company} at that ceiling where you need to ship faster but can't hire fast enough? seems to be the number one thing for {their_space or industry or 'tech'} companies right now.",
+            ],
+            'Founder': [
+                f"is {company} at the crossroads of fixing old stuff vs building new things? that's usually where founders in {their_space or industry or 'tech'} land.",
+                f"curious if {company} is dealing with the founder dilemma of speed vs quality. it never gets easier, especially at your stage.",
+                f"is {company}'s team buried in tech debt while trying to ship the next big thing? seems to be the pattern with fast-growing companies in your space.",
+            ],
+        }
+        # Get role-specific questions or default
+        title_key = title.split('&')[0].strip() if '&' in title else title
+        role_questions = pain_questions.get(title_key, pain_questions.get('CEO', []))
+        selected_pain_question = random.choice(role_questions)
+        
+        # Build the case study sentence with varied result phrasing
+        cs_result = case_study.get('result_short', case_study.get('result', ''))
+        cs_timeline = case_study.get('timeline', '')
+        cs_variations = case_study.get('result_variations', [])
+        cs_result_text = random.choice(cs_variations) if cs_variations else f"achieve {cs_result}"
+        
+        # Avoid duplicating timeline if the variation already includes a time reference
+        # Check for both exact timeline match AND general time phrases (weeks, months, days)
+        import re
+        has_time_ref = bool(re.search(r'\b\d+\s*(weeks?|months?|days?)\b', cs_result_text, re.IGNORECASE))
+        has_exact_timeline = cs_timeline.lower() in cs_result_text.lower()
+        
+        if has_time_ref or has_exact_timeline:
+            case_study_sentence = f"we helped {case_study_reference} {cs_result_text}."
+        else:
+            case_study_sentence = f"we helped {case_study_reference} {cs_result_text} in {cs_timeline}."
+        
+        # Pre-build a draft email following LeadGenJay's exact 4-line framework
+        # Line 1 = preview text (NO company name)
+        # Line 2 = poke the bear (company + pain question)
+        # Line 3 = case study
+        # Line 4 = CTA + sign-off
+        draft_email = f"""hey {first_name.lower()}, {suggested_opener}
 
-TO: {first_name} at {company} ({title})
-INDUSTRY: {their_space or industry or "tech"}
+{selected_pain_question}
 
-ASK A QUESTION ABOUT ONE OF THESE UNIVERSAL PAINS:
-- Manual processes that should be automated
-- Dev team stretched thin / can't hire fast enough  
-- Shipping too slow / roadmap slipping
-- Tech debt vs new features tradeoff
+{case_study_sentence}
 
-Pick whichever feels natural for a {title}.
+{suggested_cta}
+abdul"""
+        
+        user_prompt = f"""Rewrite this draft cold email to flow naturally. Keep ALL content, just make it conversational.
 
-**CASE STUDY - USE WORD FOR WORD:**
-"{case_study_reference}" achieved "{case_study.get('result_short', case_study.get('result'))}" in "{case_study.get('timeline')}"
+DRAFT:
+{draft_email}
 
-⚠️ HONESTY CHECK: The prospect is in {their_space or industry or 'tech'}. Your case study is about "{case_study_reference}".
-These may not match - THAT'S OK. Use "{case_study_reference}" exactly as written. Do NOT change it to "{their_space or industry or 'tech'}". Lying destroys trust.
+KEEP THESE 4 SECTIONS (each on its own line, separated by BLANK LINES):
+1. PREVIEW TEXT: "hey {first_name.lower()}, {suggested_opener}" - keep this SHORT. Do NOT add company name here.
+2. PAIN QUESTION: Must mention "{company}" and ask about their pain. Keep the follow-up sentence.
+3. CASE STUDY: "{case_study_sentence}" - use this word for word.
+4. CTA + sign-off: "{suggested_cta}" then "abdul" on next line.
 
-**WRITE 4 LINES:**
+RULES:
+- Do NOT mention "{company}" in the first line. First line is preview text only.
+- Spell "{company}" EXACTLY as shown. Do not change its spelling.
+- SEPARATE each section with a blank line (\\n\\n between them)
+- Do NOT merge sections onto the same line
+- Total 45-70 words
+- All lowercase, casual
+- No em dashes
+- Do NOT repeat any line. Each line must be unique.
 
-1. Preview text (friend): "hey {first_name.lower()}, quick one." or "random q for you."
-
-2. Question (universal pain): "are you guys still [doing X manually]?" or "is your team stuck [maintaining vs building]?"
-
-3. Case study (VERBATIM): "helped {case_study_reference} {case_study.get('result_short', 'ship faster')} in {case_study.get('timeline', '8 weeks')}."
-
-4. Soft CTA: "thoughts?"
-
-Return JSON only."""
+Return JSON: {{"subject": "{suggested_subject}", "body": "line1\\n\\nline2\\n\\nline3\\n\\ncta\\nabdul"}}."""
 
         try:
             content = self._call_llm(system_prompt, user_prompt, temperature=0.9, json_mode=True)
@@ -1554,6 +1814,73 @@ Return JSON only."""
             if not body or not body.strip():
                 print(f"   ⚠️ LLM returned empty body, using fallback")
                 return self._fallback_email(lead, campaign_context, research, case_study, suggested_cta)
+            
+            # FIX: Correct company name misspellings by Qwen
+            # Qwen sometimes drops letters or misspells the company name
+            if company:
+                body_lower_check = body.lower()
+                company_lower_check = company.lower()
+                if company_lower_check not in body_lower_check:
+                    # Try to find a close misspelling and replace it
+                    import difflib
+                    words_in_body = body.split()
+                    for idx, word in enumerate(words_in_body):
+                        # Strip punctuation for comparison
+                        clean_word = word.strip(".,!?'\"():;")
+                        # Check if this word is a close match to company name (or part of it)
+                        similarity = difflib.SequenceMatcher(None, clean_word.lower(), company_lower_check).ratio()
+                        if similarity >= 0.65 and len(clean_word) >= 3:
+                            # Preserve original casing/punctuation
+                            prefix = word[:len(word) - len(word.lstrip(".,!?'\"():;"))] if word != word.lstrip(".,!?'\"():;") else ""
+                            suffix = word[len(word.rstrip(".,!?'\"():;"))] if word != word.rstrip(".,!?'\"():;") else ""
+                            # Check if it had possessive 's
+                            if clean_word.lower().endswith("'s") or clean_word.lower().endswith("'s"):
+                                replacement = company.lower() + "'s"
+                            else:
+                                replacement = company.lower()
+                            trailing = word[len(clean_word):]
+                            words_in_body[idx] = replacement + trailing
+                            body = ' '.join(words_in_body)
+                            print(f"   🔧 Fixed company misspelling: '{clean_word}' → '{replacement}'")
+                            break
+            
+            # FIX: Deduplicate repeated lines in body
+            # Qwen sometimes repeats the CTA or other lines
+            lines = body.split('\n')
+            seen_lines = set()
+            deduped_lines = []
+            for line in lines:
+                stripped = line.strip().lower()
+                if stripped == '' or stripped not in seen_lines:
+                    deduped_lines.append(line)
+                    if stripped:
+                        seen_lines.add(stripped)
+                else:
+                    print(f"   🔧 Removed duplicate line: '{line.strip()}'")
+            body = '\n'.join(deduped_lines)
+            
+            # FIX: Ensure paragraph breaks between sections
+            # LeadGenJay emails have 4 distinct sections separated by blank lines
+            # If Qwen merged them into one paragraph, re-split
+            non_empty_lines = [l for l in body.split('\n') if l.strip()]
+            blank_line_count = body.count('\n\n')
+            if blank_line_count < 2 and len(non_empty_lines) >= 3:
+                # Try to split at sentence boundaries that look like section breaks
+                # Detect case study line (contains 'we helped' or 'helped a')
+                # Detect CTA line (short line at end like 'worth a chat?' 'thoughts?')
+                reconstructed = []
+                for j, line in enumerate(non_empty_lines):
+                    line_lower = line.strip().lower()
+                    if j > 0 and ('we helped' in line_lower or 'helped a' in line_lower):
+                        reconstructed.append('')  # blank line before case study
+                    elif j > 0 and j == len(non_empty_lines) - 1 and len(line.split()) <= 8:
+                        reconstructed.append('')  # blank line before CTA
+                    elif j > 0 and any(cta in line_lower for cta in ['worth', 'thoughts?', 'ring any', 'crazy or', 'am i off', 'make any sense', 'curious if this', 'abdul']):
+                        if not reconstructed or reconstructed[-1] != '':
+                            reconstructed.append('')  # blank line before CTA/signoff
+                    reconstructed.append(line)
+                body = '\n'.join(reconstructed)
+                print(f"   🔧 Added paragraph breaks between sections")
             
             # CRITICAL: Check for HALLUCINATED case studies
             # If AI changed the case study company type, use fallback
@@ -1609,12 +1936,18 @@ Return JSON only."""
             subject_words = len(subject.split())
             subject_is_formal = subject_words > 4 or any(w in subject.lower() for w in ['thoughts on', 'regarding', 'about your', 'question about'])
             
+            # Check for single-word subjects (need 2-4 words)
+            subject_is_short = subject_words < 2
+            
+            # Check for dashes in subject (looks like em dash)
+            subject_has_dash = '-' in subject or '—' in subject
+            
             # Also check for subject being just "Name?"
             subject_is_weak = subject.strip().lower() in [
                 f"{first_name.lower()}?", 
                 f"{first_name.lower()} ?",
                 first_name.lower(),
-            ]
+            ] or subject_is_short or subject_has_dash
             
             if subject_is_formal or subject_is_weak:
                 print(f"   ⚠️ Subject '{subject}' is too formal/weak, using: {suggested_subject}")
@@ -1623,6 +1956,13 @@ Return JSON only."""
             if starts_bad:
                 print(f"   ⚠️ Email starts with stalker pattern, using fallback...")
                 return self._fallback_email(lead, campaign_context, research, case_study, suggested_cta)
+            
+            # STRIP em dashes before validation (replace with comma instead of rejecting)
+            if '—' in body:
+                body = body.replace('—', ',')
+                print(f"   🔧 Replaced em dashes with commas")
+            if '—' in subject:
+                subject = subject.replace('—', ',')
             
             # Final validation for other issues
             body = self._validate_and_clean(body, lead, case_study)
@@ -1647,6 +1987,11 @@ Return JSON only."""
         if body is None:
             return ""
         
+        # CRITICAL: Check for em dash - the #1 AI writing tell
+        if '—' in body:
+            print(f"   ❌ EMAIL REJECTED: Contains em dash (—) - AI tell!")
+            raise ValueError("Email contains em dash (—) - banned per LeadGenJay rules")
+        
         banned_phrases = [
             "i hope this finds you well",
             "i'm reaching out",
@@ -1670,6 +2015,11 @@ Return JSON only."""
             "how are you managing",    # Too formal
             "how are you handling",    # Too formal
             "how's that affecting",    # Too formal
+            # NEW: Lazy generic phrases from LeadGenJay
+            "sound familiar?",         # Overused AI pattern
+            "you're probably",         # Generic assumption
+            "most teams struggle",     # Templated garbage
+            "you're likely",           # Another assumption
             # NEW: Lazy generic phrases
             "scaling is hard",
             "scaling is tough",
@@ -1765,17 +2115,17 @@ Return JSON only."""
         ]
         
         # PERSONALIZED openers - LeadGenJay: Line 1 = preview text, should NOT reveal pitch
-        # These should sound like they could be from a friend/colleague
+        # NO company name in opener. Must sound like a friend.
         company_openers = [
             f"quick one for you.",
-            f"had a thought about {company}.",
-            f"random q about the eng setup.",
+            f"random q.",
+            f"had a random thought.",
             f"this might be off base but...",
             f"quick thought on something.",
         ]
         
         # Use AI-generated pain point if available, otherwise use contextual fallbacks
-        # LeadGenJay: Poke the bear with OBSERVATION, not "most teams struggle with X"
+        # LeadGenJay: Poke the bear — MUST mention company name in this section
         if likely_pain and len(likely_pain) > 10:
             # Clean up the AI pain point to sound conversational
             pain = likely_pain.lower().strip()
@@ -1788,48 +2138,47 @@ Return JSON only."""
             # If pain point is too long (>15 words), use industry-specific fallback
             if len(pain.split()) > 15:
                 if 'health' in industry.lower() or 'medical' in industry.lower():
-                    pains = ["HIPAA compliance turns every 2-week feature into a 3-month project."]
+                    pains = [f"is {company}'s team spending too long on HIPAA stuff while features pile up?"]
                 elif 'fintech' in industry.lower() or 'finance' in industry.lower():
-                    pains = ["compliance keeps blocking releases while competitors ship weekly."]
+                    pains = [f"is compliance at {company} blocking releases while competitors ship weekly?"]
                 elif 'construction' in industry.lower():
-                    pains = ["coordinating sites while building product means something always drops."]
+                    pains = [f"is {company}'s team juggling site coordination and product at the same time?"]
                 else:
-                    pains = ["shipping features while fundraising usually means something drops."]
+                    pains = [f"is {company} shipping features while fundraising? usually something drops."]
             else:
                 if not pain.endswith('.'):
                     pain = pain + '.'
-                pains = [pain]
-        # LEADGENJAY STYLE: Poke the bear with a QUESTION, not a statement
-        # The question should make them think, then the case study answers it
+                pains = [f"curious if {company} is dealing with this: {pain}"]
+        # LEADGENJAY STYLE: Poke the bear with a QUESTION mentioning the company
         elif 'health' in industry.lower() or 'medical' in industry.lower():
             pains = [
-                "are you guys still doing manual HIPAA audits or did you automate that?",
-                "how's the team handling compliance while also shipping fast?",
-                "curious - do compliance reviews still take weeks on your end?",
+                f"is {company} still doing manual HIPAA audits or did you automate that?",
+                f"how's {company}'s team handling compliance while also shipping fast?",
+                f"curious if compliance reviews at {company} still take weeks.",
             ]
         elif 'fintech' in industry.lower() or 'finance' in industry.lower():
             pains = [
-                "how are you handling SOC2 stuff while also building product?",
-                "are compliance audits still eating into your feature time?",
-                "curious if PCI compliance is slowing down releases there too.",
+                f"how's {company} handling SOC2 stuff while also building product?",
+                f"are compliance audits at {company} still eating into feature time?",
+                f"curious if PCI compliance is slowing down {company}'s releases too.",
             ]
         elif 'construction' in industry.lower() or 'infrastructure' in industry.lower():
             pains = [
-                "how's the team syncing data across job sites right now?",
-                "are site inspections still bottlenecking your project timelines?",
-                "curious how you're handling field data while also building product.",
+                f"how's {company}'s team syncing data across job sites right now?",
+                f"are site inspections still bottlenecking {company}'s project timelines?",
+                f"curious how {company} is handling field data while also building product.",
             ]
         elif 'cto' in title.lower() or 'engineer' in title.lower() or 'technical' in title.lower():
             pains = [
-                "is your best talent stuck maintaining legacy stuff or actually building?",
-                "how are you balancing tech debt vs new features these days?",
-                "curious if you're still fighting fires or finally ahead of them.",
+                f"is {company}'s best talent stuck maintaining legacy stuff or actually building?",
+                f"how's {company} balancing tech debt vs new features these days?",
+                f"curious if {company} is still fighting fires or finally ahead of them.",
             ]
         else:
             pains = [
-                "how are you handling dev capacity while also fundraising?",
-                "is hiring senior devs taking forever there too?",
-                "curious how you're keeping velocity up with a lean team.",
+                f"how's {company} handling dev capacity while also fundraising?",
+                f"is hiring senior devs at {company} taking forever too?",
+                f"curious how {company} is keeping velocity up with a lean team.",
             ]
         
         # VARIED case study presentations
@@ -1854,14 +2203,14 @@ Return JSON only."""
                 f"{cs_company_hint} we know was in the same spot, now they're at {cs_result} ({cs_timeline} later).",
             ]
         
-        # Use provided CTA or pick one
+        # Use provided CTA or pick one - NO "sound familiar?" (banned as AI pattern)
         ctas = cta or random.choice([
             "worth a quick chat?",
             "ring any bells?",
-            "sound familiar?",
             "crazy or worth exploring?",
             "any of this hit home?",
             "make sense for you?",
+            "thoughts?",
         ])
         
         subject = random.choice(subjects)
@@ -1870,13 +2219,14 @@ Return JSON only."""
         case_study_line = random.choice(case_study_lines)
         
         # Build email following LeadGenJay structure with proper newlines
-        body = f"""{opener}
+        body = f"""hey {first_name.lower()}, {opener}
 
 {pain}
 
 {case_study_line}
 
-{ctas}"""
+{ctas}
+abdul"""
 
         return {
             "subject": subject,
@@ -1907,218 +2257,451 @@ Return JSON only."""
     
     def _generate_followup_same_thread(self, lead: Dict, context: Dict, previous: List) -> Dict:
         """
-        Follow-up #2: Same thread, ADD GENUINE VALUE
+        Follow-up #1 (Email 2 of 3): Same thread, ADD GENUINE VALUE
         
         LeadGenJay: "Don't say 'just following up'. Add something useful."
         "Email 2 is in the same thread as Email 1"
+        
+        Uses Ollama/Qwen (free, local) — completely separate from initial email system.
+        Falls back to template if Ollama is unavailable.
         """
         first_name = lead.get('first_name') or 'there'
         company = lead.get('company') or ''
+        title = lead.get('title') or ''
+        industry = lead.get('industry') or ''
         original_subject = previous[0]['subject'] if previous else "previous"
+        original_body = previous[0].get('body', '') if previous else ""
         
-        system_prompt = """You are LeadGenJay writing follow-up #2.
+        # Select a DIFFERENT case study than initial email
+        from primestrides_context import CASE_STUDIES
+        cs_key = self._pick_followup_case_study(lead, original_body)
+        case_study = CASE_STUDIES.get(cs_key, CASE_STUDIES['enterprise_modernization'])
+        
+        cs_result_text = random.choice(case_study.get('result_variations', [f"achieve {case_study.get('result_short', '')}"])) 
+        cs_reference = case_study.get('company_hint', case_study.get('company_name', 'a tech company'))
+        cs_timeline = case_study.get('timeline', '')
+        
+        import re
+        has_time_ref = bool(re.search(r'\b\d+\s*(weeks?|months?|days?)\b', cs_result_text, re.IGNORECASE))
+        if has_time_ref:
+            cs_result_sentence = f"{cs_result_text}"
+        else:
+            cs_result_sentence = f"{cs_result_text} in {cs_timeline}"
+        
+        company_possessive = f"{company}'" if company.endswith('s') else f"{company}'s"
+        
+        # Build a draft for Qwen to rewrite
+        openers = [
+            "forgot to mention this",
+            "one more thing",
+            "actually, thought of something",
+            "this might be more relevant",
+            "fwiw",
+            "quick aside",
+            "meant to add this",
+        ]
+        selected_opener = random.choice(openers)
+        
+        followup_ctas = [
+            "want me to send it over?",
+            "happy to share if it's useful.",
+            "want the doc?",
+            "worth a look?",
+            "want me to forward it?",
+        ]
+        selected_cta = random.choice(followup_ctas)
+        
+        draft_body = f"""{selected_opener} - we helped {cs_reference} {cs_result_sentence}. documented the whole process, might be relevant for {company}.
 
-They didn't reply to your first email. That's fine - they're busy.
+{selected_cta}"""
+        
+        system_prompt = f"""You rewrite follow-up emails in LeadGenJay's style.
 
-**LEADGENJAY'S FOLLOW-UP RULES:**
-- Same thread (Re: original subject)
-- UNDER 30 WORDS - even shorter than email 1
-- Add GENUINE value - share an insight, a specific tip, or offer something
-- NEVER say "just following up", "circling back", "bumping this", "checking in"
-- NEVER guilt trip or sound desperate
-- Sound like a friend who thought of something helpful
+CONTEXT:
+- You are emailing {first_name} who works at "{company}" (THE LEAD'S COMPANY)
+- The case study company is "{cs_reference}" (A DIFFERENT COMPANY we helped before)
+- NEVER confuse these two. "{company}" is who you're emailing. "{cs_reference}" is the past client.
 
-**GOOD FOLLOW-UP PATTERNS:**
-- "one thing I forgot - [specific insight related to their pain]"
-- "fwiw - [quick tip or resource]. happy to share more."
-- "forgot to mention - [something valuable]"
+RULES:
+- This is email #2 in the same thread. Subject stays "Re: [original]".
+- UNDER 40 words. Shorter than the first email.
+- PURPOSE: explain in more depth HOW we made the case study result possible. Don't just name-drop the result, explain the approach or what we did.
+- NEVER say "just following up", "circling back", "bumping this", "checking in", "wanted to follow up", "remember"
+- Sound like a casual friend who remembered something useful
+- ALL lowercase except proper nouns like "{company}" and "{cs_reference}"
+- No exclamation marks (!). Keep it chill.
+- End with a soft CTA question
+- Spell "{company}" exactly as shown (case-sensitive)
+- No em dashes. Use commas or periods.
+- No signatures, no sign-offs, no greetings like "hi" or "hey"
 
-**BAD PATTERNS (NEVER USE):**
-- "just following up on my last email"
-- "wanted to circle back"
-- "bumping this to the top of your inbox"
-- "did you get a chance to read my email?"
-- "I hope this email finds you well"
-- "per my last email"
+Return JSON: {{"body": "the rewritten follow-up body"}}"""
 
-Write like you're texting a friend who you thought of something useful for.
-ALL LOWERCASE. No capital letters except proper nouns.
+        user_prompt = f"""Rewrite this follow-up draft. The goal is to explain HOW we achieved the result for our past client, not just what the result was.
 
-Return JSON: {"subject": "Re: [original]", "body": "..."}"""
+DRAFT:
+{draft_body}
 
-        user_prompt = f"""Follow up with {first_name} at {company}.
-Original subject: {original_subject}
+Lead's company: {company} (you're emailing them)
+Case study client: {cs_reference} (our past client, different company)
+Case study result: {cs_result_sentence}
+Lead: {first_name} ({title} at {company}, {industry})
 
-Write a SHORT follow-up (under 30 words) that adds value.
-Don't repeat what you said before - add something NEW and helpful.
+Explain the approach briefly (e.g. "we did X which led to Y"). Under 40 words. Keep the CTA.
 
-Example format:
-one thing I forgot -
-
-we actually documented how we did the 3.2x deploy speedup. might be useful for your team.
-
-want me to send it over?"""
-
+Return JSON: {{"body": "..."}}"""
+        
         try:
-            content = self._call_llm(system_prompt, user_prompt, temperature=0.85, json_mode=True)
+            content = self._call_ollama_for_followup(system_prompt, user_prompt, temperature=0.85)
             result = json.loads(content)
             body = result.get("body") or ""
-            if not body.strip():
-                # LeadGenJay-style fallback
-                return {
-                    "subject": f"Re: {original_subject}",
-                    "body": f"""one thing I forgot -
-
-we documented how we hit those deploy numbers. might be useful for {company}.
-
-want me to send it over?"""
-                }
             
-            # Humanize
+            if not body.strip() or len(body.split()) < 8:
+                raise ValueError("Body too short or empty")
+            
+            # Post-processing (same quality checks as initial emails)
             body = humanize_email(body)
+            
+            # Fix company misspelling
+            if company and company.lower() not in body.lower():
+                import difflib
+                words = body.split()
+                for idx, word in enumerate(words):
+                    clean = word.strip(".,!?'\"():;")
+                    sim = difflib.SequenceMatcher(None, clean.lower(), company.lower()).ratio()
+                    if sim >= 0.7 and len(clean) >= 3:
+                        body = body.replace(clean, company)
+                        break
+            
+            # Remove em dashes
+            body = body.replace('—', ',')
+            body = body.replace('–', ',')
             
             return {
                 "subject": f"Re: {original_subject}",
                 "body": body
             }
+            
         except Exception as e:
-            print(f"Error generating follow-up: {e}")
+            print(f"   ⚠️ Ollama follow-up failed ({e}), using template fallback")
+            body = f"""{selected_opener} - we helped {cs_reference} {cs_result_sentence}. documented the whole process, might be relevant for {company}.
+
+{selected_cta}"""
+            body = humanize_email(body)
             return {
                 "subject": f"Re: {original_subject}",
-                "body": f"""one thing I forgot -
-
-we documented how we hit those deploy numbers. might be useful for {company}.
-
-want me to send it over?"""
+                "body": body
             }
+    
+    def _pick_followup_case_study(self, lead: Dict, original_body: str) -> str:
+        """Pick a case study for follow-up, trying to avoid repeating the one from initial email."""
+        from primestrides_context import CASE_STUDIES
+        
+        industry = (lead.get('industry') or '').lower()
+        title = (lead.get('title') or '').lower()
+        original_lower = original_body.lower()
+        
+        # All main case study keys (not aliases)
+        all_keys = ['hr_tech_ai', 'saas_mvp', 'enterprise_modernization', 'fintech_client', 'healthtech_client', 'construction_tech']
+        
+        # Figure out which case study was used in the initial email by checking body text
+        used_key = None
+        for key in all_keys:
+            cs = CASE_STUDIES[key]
+            # Check if the case study's company_name or hint appears in the original body
+            if cs.get('company_name', '').lower() in original_lower or cs.get('company_hint', '').lower() in original_lower:
+                used_key = key
+                break
+            # Also check result text
+            if cs.get('result_short', '').lower() in original_lower:
+                used_key = key
+                break
+        
+        # Available keys (excluding the one already used)
+        available = [k for k in all_keys if k != used_key]
+        
+        # Try to match by industry keywords
+        industry_keywords = {
+            'hr_tech_ai': ['hr', 'human resources', 'recruiting', 'hiring', 'talent', 'ai', 'automation', 'machine learning'],
+            'saas_mvp': ['saas', 'startup', 'mvp', 'b2b', 'software', 'platform'],
+            'enterprise_modernization': ['enterprise', 'legacy', 'staffing', 'modernization', 'large'],
+            'fintech_client': ['fintech', 'finance', 'banking', 'payments', 'financial', 'insurance'],
+            'healthtech_client': ['health', 'medical', 'hipaa', 'healthcare', 'pharma', 'biotech'],
+            'construction_tech': ['construction', 'field', 'logistics', 'operations', 'infrastructure', 'manufacturing'],
+        }
+        
+        # Score each available case study
+        best_key = None
+        best_score = -1
+        for key in available:
+            score = 0
+            keywords = industry_keywords.get(key, [])
+            for kw in keywords:
+                if kw in industry or kw in title:
+                    score += 1
+            if score > best_score:
+                best_score = score
+                best_key = key
+        
+        # If no good match, pick randomly from available
+        if best_score == 0:
+            return random.choice(available) if available else 'enterprise_modernization'
+        
+        return best_key
     
     def _generate_followup_new_thread(self, lead: Dict, context: Dict, previous: List) -> Dict:
         """
-        Follow-up #3: NEW thread, completely different angle
+        Follow-up #2 (Email 3 of 3): NEW thread, completely different angle
         
         LeadGenJay: "Email 3 should be a fresh start with different subject and angle"
         "Give away something valuable for free - the front-end offer"
+        
+        Uses Ollama/Qwen (free, local) — completely separate from initial email system.
+        Falls back to template if Ollama is unavailable.
         """
         first_name = lead.get('first_name') or 'there'
         company = lead.get('company') or ''
-        front_end_offer = context.get('front_end_offer') or 'free architecture review'
+        title = lead.get('title') or ''
+        industry = lead.get('industry') or ''
         
-        system_prompt = """You are LeadGenJay writing follow-up #3 - a FRESH email.
-
-They didn't reply to emails 1 or 2. No worries. This is a completely fresh start.
-
-**LEADGENJAY'S EMAIL 3 RULES:**
-- NEW subject line - something like "different thought" or "quick idea"
-- Different angle than before - offer your FRONT-END OFFER (free value)
-- Don't reference previous emails AT ALL
-- Under 40 words
-- End with a soft question
-
-**FRONT-END OFFER CONCEPT (LeadGenJay):**
-"Give away something valuable for free. If someone raises their hand for the free thing,
-you have a warm lead. The free thing should take 15-30 mins of your time and showcase
-your expertise."
-
-Examples of front-end offers:
-- Free architecture review
-- Free technical audit
-- Free 30-min strategy session
-- Free code review
-- Free deployment assessment
-
-**FORMAT:**
-Line 1: their name + dash
-Line 2-3: the offer (specific, valuable, no pitch)
-Line 4: soft CTA question
-
-ALL LOWERCASE. No capital letters except proper nouns.
-DO NOT include signature or sign-off. End with the question.
-
-Return JSON: {"subject": "...", "body": "..."}"""
-
+        # Get front-end offer from campaign context, or build one from role
+        front_end_offer = context.get('front_end_offer') or ''
+        if not front_end_offer:
+            title_upper = (title or '').upper()
+            if 'CTO' in title_upper or 'ENG' in title_upper:
+                front_end_offer = 'free technical roadmap session'
+            elif 'PRODUCT' in title_upper or 'CPO' in title_upper:
+                front_end_offer = 'free roadmap acceleration session'
+            elif 'AI' in title_upper or 'ML' in title_upper:
+                front_end_offer = 'free AI architecture review'
+            else:
+                front_end_offer = 'free 30-min architecture review'
+        
         previous_subjects = [e.get('subject', '') for e in previous]
         
-        user_prompt = f"""Fresh email to {first_name} at {company}.
-Previous subjects used (DON'T repeat): {previous_subjects}
-Front-end offer to make: {front_end_offer}
+        # Pick a new subject (varied, never reusing previous)
+        new_subjects = [
+            "different thought",
+            "random idea", 
+            "separate thought",
+            "quick idea",
+            "different angle",
+            "unrelated thought",
+        ]
+        available_subjects = [s for s in new_subjects if s not in previous_subjects]
+        new_subject = random.choice(available_subjects) if available_subjects else random.choice(new_subjects)
+        
+        company_possessive = f"{company}'" if company.endswith('s') else f"{company}'s"
+        
+        # Build draft for Qwen to rewrite — role-specific pain reframe
+        title_upper = (title or '').upper()
+        if 'CTO' in title_upper or 'CHIEF TECH' in title_upper:
+            pain_angle = f"we built a doc on how {industry or 'tech'} teams at {company_possessive} stage avoid the hire-vs-outsource trap"
+        elif 'VP' in title_upper and 'ENG' in title_upper:
+            pain_angle = f"we put together a breakdown of how teams like {company_possessive} unblock their roadmap without adding headcount"
+        elif 'FOUNDER' in title_upper or 'CO-FOUNDER' in title_upper:
+            pain_angle = f"we documented how founders in {industry or 'tech'} ship their product backlog 3x faster"
+        elif 'PRODUCT' in title_upper or 'CPO' in title_upper:
+            pain_angle = f"we wrote up how product teams at {company_possessive} stage unblock engineering without the politics"
+        else:
+            pain_angle = f"we put together a doc on how {industry or 'tech'} companies at {company_possessive} stage fix the engineering bottleneck"
+        
+        draft_body = f"""hey {first_name.lower()}, {pain_angle}. based on real numbers from companies we've worked with.
 
-Write a fresh email offering the front-end offer. Under 40 words.
+want me to send it over?"""
+        
+        system_prompt = f"""You rewrite cold emails in LeadGenJay's style.
 
-Example:
-{first_name.lower()} -
+CONTEXT:
+- This is email #3 in the sequence. COMPLETELY NEW thread. They ignored emails 1 and 2.
+- The angle: offer a FREE resource/lead magnet (not a meeting). Lower the friction.
+- LeadGenJay says: "they've already ignored you. your CTA was too much of an ask. offer more value and give them something in return."
 
-totally different idea. we're doing free {front_end_offer}s this month for teams scaling fast.
+RULES:
+- Start naturally, like texting a colleague. Use "hey {first_name.lower()}," or just jump in.
+- Do NOT use the "name -" or "name —" format. No dashes after the name.
+- UNDER 40 words total
+- OFFER A RESOURCE, DOC, OR BREAKDOWN. Not a meeting or call.
+- Frame it as something we already built for companies LIKE theirs (not specifically for them). Use "teams like yours" or "companies at your stage", NOT "{company}'s roadmap".
+- Explain WHY it's relevant to their specific role as {title}
+- ALL lowercase except proper nouns like "{company}"
+- No exclamation marks. Keep it chill.
+- End with a low-friction CTA like "want me to send it over?" or "want the doc?"
+- Spell "{company}" exactly as shown (case-sensitive)
+- No em dashes. Use commas or periods.
+- No signatures, no sign-offs
+- Don't mention previous emails
 
-30 mins, specific feedback, no pitch.
+Return JSON: {{"body": "the rewritten email body"}}"""
 
-want one?"""
+        user_prompt = f"""Rewrite this email offering a free resource. Frame it as something we already have, not something we'd create.
 
+DRAFT:
+{draft_body}
+
+Lead: {first_name} ({title} at {company}, {industry})
+Their role: {title}
+Front-end offer: {front_end_offer}
+
+Make it role-specific to a {title}. Lower the CTA friction, just offer to send the doc. Under 40 words.
+
+Return JSON: {{"body": "..."}}"""
+        
         try:
-            content = self._call_llm(system_prompt, user_prompt, temperature=0.9, json_mode=True)
+            content = self._call_ollama_for_followup(system_prompt, user_prompt, temperature=0.85)
             result = json.loads(content)
-            subject = result.get("subject") or "different thought"
             body = result.get("body") or ""
-            if not body.strip():
-                # LeadGenJay-style fallback
-                return {
-                    "subject": "different thought",
-                    "body": f"""{first_name.lower()} -
-
-totally different idea. we're doing free {front_end_offer}s this month.
-
-30 mins, specific feedback, no pitch.
-
-interested?""",
-                    "new_thread": True
-                }
             
-            # Humanize
+            if not body.strip() or len(body.split()) < 10:
+                raise ValueError("Body too short or empty")
+            
+            # Strip any name-dash format Qwen might still produce
+            body_lower_first = first_name.lower()
+            if body.strip().startswith(f"{body_lower_first} -") or body.strip().startswith(f"{body_lower_first} –"):
+                body = body.strip()
+                body = body[len(body_lower_first):].lstrip(' -–').strip()
+                body = f"hey {body_lower_first}, {body}"
+            
+            # Post-processing
             body = humanize_email(body)
+            
+            # Fix company misspelling
+            if company and company.lower() not in body.lower():
+                import difflib
+                words = body.split()
+                for idx, word in enumerate(words):
+                    clean = word.strip(".,!?'\"():;")
+                    sim = difflib.SequenceMatcher(None, clean.lower(), company.lower()).ratio()
+                    if sim >= 0.7 and len(clean) >= 3:
+                        body = body.replace(clean, company)
+                        break
+            
+            # Remove em dashes
+            body = body.replace('—', ',')
+            body = body.replace('–', ',')
+            
+            return {
+                "subject": new_subject,
+                "body": body,
+                "new_thread": True
+            }
+            
+        except Exception as e:
+            print(f"   ⚠️ Ollama new-thread follow-up failed ({e}), using template fallback")
+            body = f"""hey {first_name.lower()}, {pain_angle}. based on real numbers from companies we've worked with.
+
+want me to send it over?"""
+            body = humanize_email(body)
+            return {
+                "subject": new_subject,
+                "body": body,
+                "new_thread": True
+            }
+    
+    def _generate_breakup_email(self, lead: Dict, context: Dict, previous: List) -> Dict:
+        """
+        Final email (if needed beyond 3) - helpful redirect, not guilt trip
+        
+        LeadGenJay: "Should I reach out to someone else?" is incredibly effective
+        because it triggers reciprocity.
+        
+        Uses Ollama/Qwen (free, local) for variety.
+        Falls back to template if Ollama is unavailable.
+        """
+        first_name = lead.get('first_name') or 'there'
+        company = lead.get('company') or ''
+        title = lead.get('title') or ''
+        
+        subjects = ["closing the loop", "last note", "quick check"]
+        subject = random.choice(subjects)
+        
+        # Figure out a plausible alternate role to redirect to (Eric's technique)
+        title_upper = (title or '').upper()
+        if 'CEO' in title_upper or 'FOUNDER' in title_upper:
+            alt_role = "your CTO or VP of Engineering"
+        elif 'CTO' in title_upper:
+            alt_role = "your VP of Engineering or a team lead"
+        elif 'VP' in title_upper:
+            alt_role = "your CTO or another engineering lead"
+        elif 'PRODUCT' in title_upper or 'CPO' in title_upper:
+            alt_role = "your CTO or engineering lead"
+        else:
+            alt_role = "someone else on the engineering side"
+        
+        # Draft template for Qwen to rewrite — Eric's technique: suggest a specific alternate role
+        draft_body = f"""hey {first_name.lower()}, maybe engineering bandwidth isn't your call at {company}. should i reach out to {alt_role} instead, or should i close this out?"""
+        
+        system_prompt = f"""You rewrite breakup emails in LeadGenJay's style.
+
+CONTEXT:
+- Eric Nowoslawski's breakup template: "Fred, I know there's about 20 employees at Otter PR and perhaps SDR is not your responsibility. Should I reach out to Scott instead given their role?"
+- The key insight: suggest reaching out to a SPECIFIC ROLE, not just "someone else"
+
+RULES:
+- This is the FINAL email. Be graceful, not desperate.
+- Start naturally, like texting a colleague. Use "hey {first_name.lower()}," or just jump in.
+- Do NOT use the "name -" or "name —" format. No dashes after the name.
+- UNDER 30 words
+- MUST end with a question suggesting you reach out to a specific role: "{alt_role}"
+- The redirect-to-someone-else angle triggers reciprocity
+- ALL lowercase except proper nouns like "{company}"
+- Spell "{company}" exactly as shown (case-sensitive). Every letter must match.
+- NOT guilt-trippy, NOT passive-aggressive, NOT whiny
+- No exclamation marks. No em dashes. Use commas or periods.
+- No signatures, no sign-offs
+
+Return JSON: {{"body": "the breakup email body"}}"""
+
+        user_prompt = f"""Rewrite this breakup email. Keep the redirect-to-alternate-role angle.
+
+DRAFT:
+{draft_body}
+
+Lead: {first_name} ({title} at {company})
+Alternate role to suggest: {alt_role}
+
+Spell "{company}" exactly like that (case-sensitive). Under 30 words.
+
+Return JSON: {{"body": "..."}}"""
+        
+        try:
+            content = self._call_ollama_for_followup(system_prompt, user_prompt, temperature=0.9)
+            result = json.loads(content)
+            body = result.get("body") or ""
+            
+            if not body.strip() or len(body.split()) < 8:
+                raise ValueError("Body too short or empty")
+            
+            # Strip any name-dash format Qwen might still produce
+            body_lower_first = first_name.lower()
+            if body.strip().startswith(f"{body_lower_first} -") or body.strip().startswith(f"{body_lower_first} –"):
+                body = body.strip()
+                body = body[len(body_lower_first):].lstrip(' -–').strip()
+                body = f"hey {body_lower_first}, {body}"
+            
+            body = body.replace('—', ',')
+            body = body.replace('–', ',')
             
             return {
                 "subject": subject,
                 "body": body,
                 "new_thread": True
             }
+            
         except Exception as e:
+            print(f"   ⚠️ Ollama breakup email failed ({e}), using template fallback")
+            templates = [
+                f"""hey {first_name.lower()}, maybe engineering bandwidth isn't your call at {company}. should i reach out to {alt_role} instead, or close this out?""",
+                
+                f"""hey {first_name.lower()}, not trying to be a pest. if the timing's off, totally get it. should i check back in a few months, or talk to {alt_role} at {company}?""",
+                
+                f"""hey {first_name.lower()}, totally understand if this isn't a priority at {company} right now. would it make more sense to connect with {alt_role}?""",
+            ]
             return {
-                "subject": "different thought",
-                "body": f"""{first_name.lower()} -
-
-totally different idea. we're doing free {front_end_offer}s this month.
-
-30 mins, specific feedback, no pitch.
-
-interested?""",
+                "subject": subject,
+                "body": random.choice(templates),
                 "new_thread": True
             }
-    
-    def _generate_breakup_email(self, lead: Dict, context: Dict, previous: List) -> Dict:
-        """
-        Final email - helpful redirect, not guilt trip
-        
-        LeadGenJay: "Should I reach out to someone else?" is incredibly effective
-        because it triggers reciprocity. They feel bad ignoring you, and often
-        either respond or refer you to someone else.
-        """
-        first_name = lead.get('first_name') or 'there'
-        company = lead.get('company') or ''
-        
-        # LeadGenJay tip: "Should I reach out to someone else?" works well
-        # Keep it SHORT and non-desperate
-        body = f"""{first_name.lower()} -
-
-last note from me. if dev bandwidth becomes a priority at {company}, happy to help.
-
-should I reach out to someone else on your team, or close the loop here?
-
-either way, rooting for you guys."""
-
-        return {
-            "subject": "closing the loop",
-            "body": body,
-            "new_thread": True
-        }
 
 
 # Test
