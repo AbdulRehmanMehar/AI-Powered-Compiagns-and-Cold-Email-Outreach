@@ -728,7 +728,7 @@ class EmailReviewer:
         
         body_lower = body.lower()
         subject_lower = subject.lower()
-        company = lead.get('company', '').lower()
+        company = (lead.get('company') or '').lower()
         
         # =================================================================
         # CHECK 1: Word count (CRITICAL)
@@ -958,7 +958,7 @@ class EmailReviewer:
             "impressive", "amazing company", "doing well", "great job",
             "new feature", "new product", "your platform"
         ]
-        company = lead.get('company', '').lower()
+        company = (lead.get('company') or '').lower()
         
         for pattern in vague_patterns:
             if pattern in body_lower and company not in body_lower:
