@@ -25,6 +25,7 @@ services:
       - GROQ_MODEL=${GROQ_MODEL}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
+      - SCHEDULER_MODE=async   
     healthcheck:
       test: ["CMD", "python", "-c", "from database import campaigns_collection; print('healthy') if campaigns_collection.database.client.server_info() else exit(1)"]
       interval: 30s
