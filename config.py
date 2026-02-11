@@ -56,8 +56,10 @@ def parse_email_accounts() -> List[Dict[str, str]]:
     return accounts
 
 ZOHO_ACCOUNTS = parse_email_accounts()
-ZOHO_SMTP_HOST = os.getenv("ZOHO_SMTP_HOST", "smtp.zoho.com")
+ZOHO_SMTP_HOST = os.getenv("ZOHO_SMTP_HOST", "smtppro.zoho.com")
 ZOHO_SMTP_PORT = int(os.getenv("ZOHO_SMTP_PORT", "587"))
+ZOHO_IMAP_HOST = os.getenv("ZOHO_IMAP_HOST", "imappro.zoho.com")
+ZOHO_IMAP_PORT = int(os.getenv("ZOHO_IMAP_PORT", "993"))
 
 # Email rotation
 EMAIL_ROTATION_STRATEGY = os.getenv("EMAIL_ROTATION_STRATEGY", "round-robin")  # "round-robin" or "random"

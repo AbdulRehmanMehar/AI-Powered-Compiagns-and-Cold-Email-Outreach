@@ -29,9 +29,9 @@ COPY . .
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
-# Health check
+# Health check — verifies MongoDB is reachable
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import schedule; print('healthy')" || exit 1
+    CMD python -c "from database import db; db.command('ping')" || exit 1
 
-# Default command - run the auto scheduler
-CMD ["python", "auto_scheduler.py"]
+# Entry point — SCHEDULER_MODE=async runs v2, anything else runs legacy
+CMD ["sh", "-c", "if [ \"$SCHEDULER_MODE\" = 'async' ]; then python main_v2.py; else python auto_scheduler.py; fi"]

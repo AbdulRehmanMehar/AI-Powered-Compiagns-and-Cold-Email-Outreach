@@ -73,8 +73,8 @@ class ReplyDetector:
     
     def __init__(self):
         self.accounts = config.ZOHO_ACCOUNTS
-        self.imap_host = "imap.zoho.com"
-        self.imap_port = 993
+        self.imap_host = config.ZOHO_IMAP_HOST
+        self.imap_port = config.ZOHO_IMAP_PORT
         self._connections: Dict[str, imaplib.IMAP4_SSL] = {}
         self._failed_accounts: Set[str] = set()  # Track accounts that failed to connect
     

@@ -1756,7 +1756,6 @@ Return JSON: {{"subject": "2-3 word subject", "body": "line1\\n\\nline2\\n\\nlin
         
         # Avoid duplicating timeline if the variation already includes a time reference
         # Check for both exact timeline match AND general time phrases (weeks, months, days)
-        import re
         has_time_ref = bool(re.search(r'\b\d+\s*(weeks?|months?|days?)\b', cs_result_text, re.IGNORECASE))
         has_exact_timeline = cs_timeline.lower() in cs_result_text.lower()
         
@@ -2131,7 +2130,6 @@ Return JSON: {{"subject": "{suggested_subject}", "body": "line1\\n\\nline2\\n\\n
             pain = likely_pain.lower().strip()
             
             # Remove any personal references like "for mike" "for tom"
-            import re
             pain = re.sub(r'\bfor\s+\w+\b', '', pain)
             pain = re.sub(r'\b(his|her|their)\s+team\b', 'teams', pain)
             
@@ -2281,7 +2279,6 @@ abdul"""
         cs_reference = case_study.get('company_hint', case_study.get('company_name', 'a tech company'))
         cs_timeline = case_study.get('timeline', '')
         
-        import re
         has_time_ref = bool(re.search(r'\b\d+\s*(weeks?|months?|days?)\b', cs_result_text, re.IGNORECASE))
         if has_time_ref:
             cs_result_sentence = f"{cs_result_text}"

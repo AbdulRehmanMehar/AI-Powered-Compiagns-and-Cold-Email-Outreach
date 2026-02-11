@@ -647,7 +647,6 @@ class EmailReviewer:
                 # Extract the key part (banned phrase or pattern)
                 if 'banned phrase' in v_str.lower():
                     # Extract just the phrase: "Contains banned phrase: 'bandwidth'" -> "bandwidth"
-                    import re
                     match = re.search(r"'([^']+)'", v_str)
                     if match:
                         v_key = f"NEVER use: '{match.group(1)}'"
@@ -787,7 +786,6 @@ class EmailReviewer:
             (r"^(random|odd|quick)\s+(thought|q)\.\s+scaling\s+(at\s+)?\w+\s+must", "Templated opener: 'scaling at [Company] must...' pattern"),
         ]
         
-        import re
         for pattern, message in templated_opener_patterns:
             if re.search(pattern, first_line):
                 violations.append(message)

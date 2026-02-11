@@ -9,3 +9,7 @@ pytz==2024.1
 dnspython>=2.4.0
 httpx>=0.25.0
 beautifulsoup4>=4.12.0
+
+# v2 async dependencies
+aiosmtplib>=3.0.0
+aiohttp>=3.9.0

@@ -20,6 +20,7 @@ ENV/
 .env.local
 .env.*.local
 
+
 # Git
 .git/
 .gitignore
@@ -32,6 +33,12 @@ docker-compose*.yml
 # Docs
 *.md
 docs/
+
+# Tests
+tests/
+
+# Data
+data/
 
 # Misc
 .DS_Store

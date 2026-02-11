@@ -175,7 +175,6 @@ class LeadEnricher:
         
         # FALLBACK: Try to derive domain from company name
         # e.g., "Acme Corp" → "acmecorp.com", "DataVault" → "datavault.com"
-        import re
         company = lead.get('company') or lead.get('current_employer') or ''
         if raw_data:
             company = company or raw_data.get('current_employer', '')
