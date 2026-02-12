@@ -316,6 +316,7 @@ class TestAccountPoolEligibility(unittest.TestCase):
         mock_config.TARGET_TIMEZONE = "America/New_York"
         mock_config.EMAILS_PER_DAY_PER_MAILBOX = 25
         mock_config.WARMUP_ENABLED = False
+        mock_config.GLOBAL_DAILY_TARGET = 0
         mock_blocked.cleanup_expired.return_value = None
         mock_blocked.is_blocked.return_value = False
         mock_stats.get_sends_today.return_value = 25
@@ -337,6 +338,7 @@ class TestAccountPoolEligibility(unittest.TestCase):
         mock_config.TARGET_TIMEZONE = "America/New_York"
         mock_config.EMAILS_PER_DAY_PER_MAILBOX = 25
         mock_config.WARMUP_ENABLED = False
+        mock_config.GLOBAL_DAILY_TARGET = 0
         mock_blocked.cleanup_expired.return_value = None
         mock_blocked.is_blocked.return_value = False
         mock_stats.get_sends_today.return_value = 5
@@ -359,6 +361,7 @@ class TestAccountPoolEligibility(unittest.TestCase):
         mock_config.TARGET_TIMEZONE = "America/New_York"
         mock_config.EMAILS_PER_DAY_PER_MAILBOX = 25
         mock_config.WARMUP_ENABLED = False
+        mock_config.GLOBAL_DAILY_TARGET = 0
         mock_blocked.cleanup_expired.return_value = None
         mock_blocked.is_blocked.return_value = False
         mock_stats.get_sends_today.return_value = 5
@@ -383,6 +386,7 @@ class TestAccountPoolEligibility(unittest.TestCase):
         mock_config.TARGET_TIMEZONE = "America/New_York"
         mock_config.EMAILS_PER_DAY_PER_MAILBOX = 25
         mock_config.WARMUP_ENABLED = False
+        mock_config.GLOBAL_DAILY_TARGET = 0
         mock_blocked.cleanup_expired.return_value = None
         mock_blocked.is_blocked.return_value = False
         mock_stats.get_sends_today.return_value = 5
@@ -410,6 +414,7 @@ class TestAccountPoolWaitTime(unittest.TestCase):
         mock_config.TARGET_TIMEZONE = "America/New_York"
         mock_config.EMAILS_PER_DAY_PER_MAILBOX = 25
         mock_config.WARMUP_ENABLED = False
+        mock_config.GLOBAL_DAILY_TARGET = 0
         mock_blocked.cleanup_expired.return_value = None
         mock_blocked.is_blocked.return_value = False
         mock_stats.get_sends_today.return_value = 25  # At limit
@@ -430,6 +435,7 @@ class TestAccountPoolWaitTime(unittest.TestCase):
         mock_config.TARGET_TIMEZONE = "America/New_York"
         mock_config.EMAILS_PER_DAY_PER_MAILBOX = 25
         mock_config.WARMUP_ENABLED = False
+        mock_config.GLOBAL_DAILY_TARGET = 0
         mock_blocked.cleanup_expired.return_value = None
         mock_blocked.is_blocked.return_value = False
         mock_stats.get_sends_today.return_value = 5
@@ -497,6 +503,230 @@ class TestReputationThresholds(unittest.TestCase):
         from v2.account_pool import AccountReputation
 
         self.assertGreater(AccountReputation.WARNING_THRESHOLD, AccountReputation.PAUSE_THRESHOLD)
+
+
+class TestGlobalDailyTarget(unittest.TestCase):
+    """Test GLOBAL_DAILY_TARGET logic in _get_daily_limit."""
+
+    @patch("v2.account_pool.BlockedAccounts")
+    @patch("v2.account_pool.WarmDown.get_warmdown_limit", return_value=None)
+    @patch("v2.account_pool.SendingStats")
+    @patch("v2.account_pool.config")
+    def test_global_target_disabled_uses_per_mailbox(self, mock_config, mock_stats, mock_wd, mock_blocked):
+        """When GLOBAL_DAILY_TARGET=0, fall back to EMAILS_PER_DAY_PER_MAILBOX."""
+        from v2.account_pool import AccountPool
+
+        mock_config.ZOHO_ACCOUNTS = [{"email": "a@test.com", "password": "p", "sender_name": "A"}]
+        mock_config.TARGET_TIMEZONE = "America/New_York"
+        mock_config.GLOBAL_DAILY_TARGET = 0
+        mock_config.WARMUP_ENABLED = False
+        mock_config.EMAILS_PER_DAY_PER_MAILBOX = 25
+        mock_blocked.cleanup_expired.return_value = None
+
+        pool = AccountPool()
+        limit = pool._get_daily_limit("a@test.com")
+        self.assertEqual(limit, 25)
+
+    @patch("v2.account_pool.BlockedAccounts")
+    @patch("v2.account_pool.WarmDown.get_warmdown_limit", return_value=None)
+    @patch("v2.account_pool.SendingStats")
+    @patch("v2.account_pool.config")
+    def test_global_target_distributes_evenly(self, mock_config, mock_stats, mock_wd, mock_blocked):
+        """300 target across 6 accounts → 50 each."""
+        from v2.account_pool import AccountPool
+
+        accounts = [
+            {"email": f"user{i}@test.com", "password": "p", "sender_name": f"U{i}"}
+            for i in range(6)
+        ]
+        mock_config.ZOHO_ACCOUNTS = accounts
+        mock_config.TARGET_TIMEZONE = "America/New_York"
+        mock_config.GLOBAL_DAILY_TARGET = 300
+        mock_config.WARMUP_ENABLED = False
+        mock_config.EMAILS_PER_DAY_PER_MAILBOX = 100
+        mock_blocked.cleanup_expired.return_value = None
+        mock_blocked.is_blocked.return_value = False
+
+        pool = AccountPool()
+        limit = pool._get_daily_limit("user0@test.com")
+        self.assertEqual(limit, 50)  # ceil(300/6)
+
+    @patch("v2.account_pool.BlockedAccounts")
+    @patch("v2.account_pool.WarmDown.get_warmdown_limit", return_value=None)
+    @patch("v2.account_pool.SendingStats")
+    @patch("v2.account_pool.config")
+    def test_global_target_adjusts_for_blocked(self, mock_config, mock_stats, mock_wd, mock_blocked):
+        """If 2 of 6 accounts are blocked, target distributes across 4."""
+        from v2.account_pool import AccountPool
+
+        accounts = [
+            {"email": f"user{i}@test.com", "password": "p", "sender_name": f"U{i}"}
+            for i in range(6)
+        ]
+        mock_config.ZOHO_ACCOUNTS = accounts
+        mock_config.TARGET_TIMEZONE = "America/New_York"
+        mock_config.GLOBAL_DAILY_TARGET = 300
+        mock_config.WARMUP_ENABLED = False
+        mock_config.EMAILS_PER_DAY_PER_MAILBOX = 100
+        mock_blocked.cleanup_expired.return_value = None
+        # 2 accounts blocked
+        mock_blocked.is_blocked.side_effect = lambda e: e in ("user0@test.com", "user1@test.com")
+
+        pool = AccountPool()
+        limit = pool._get_daily_limit("user2@test.com")
+        self.assertEqual(limit, 75)  # ceil(300/4)
+
+    @patch("v2.account_pool.BlockedAccounts")
+    @patch("v2.account_pool.WarmDown.get_warmdown_limit", return_value=None)
+    @patch("v2.account_pool.SendingStats")
+    @patch("v2.account_pool.config")
+    def test_global_target_capped_by_warmup(self, mock_config, mock_stats, mock_wd, mock_blocked):
+        """Global target can't exceed warmup limit for young accounts."""
+        from v2.account_pool import AccountPool
+
+        accounts = [
+            {"email": f"user{i}@test.com", "password": "p", "sender_name": f"U{i}"}
+            for i in range(6)
+        ]
+        mock_config.ZOHO_ACCOUNTS = accounts
+        mock_config.TARGET_TIMEZONE = "America/New_York"
+        mock_config.GLOBAL_DAILY_TARGET = 300
+        mock_config.WARMUP_ENABLED = True
+        mock_config.WARMUP_WEEK1_LIMIT = 3
+        mock_config.WARMUP_WEEK2_LIMIT = 7
+        mock_config.WARMUP_WEEK3_LIMIT = 12
+        mock_config.WARMUP_WEEK4_LIMIT = 20
+        mock_config.EMAILS_PER_DAY_PER_MAILBOX = 100
+        mock_blocked.cleanup_expired.return_value = None
+        mock_blocked.is_blocked.return_value = False
+        # Account is 5 days old (week 1)
+        mock_stats.get_account_age_days.return_value = 5
+
+        pool = AccountPool()
+        limit = pool._get_daily_limit("user0@test.com")
+        # ceil(300/6) = 50, but warmup week 1 = 3 → capped to 3
+        self.assertEqual(limit, 3)
+
+    @patch("v2.account_pool.BlockedAccounts")
+    @patch("v2.account_pool.WarmDown.get_warmdown_limit", return_value=None)
+    @patch("v2.account_pool.SendingStats")
+    @patch("v2.account_pool.config")
+    def test_global_target_mature_accounts(self, mock_config, mock_stats, mock_wd, mock_blocked):
+        """Mature accounts (week 4+) get full global target share."""
+        from v2.account_pool import AccountPool
+
+        accounts = [
+            {"email": f"user{i}@test.com", "password": "p", "sender_name": f"U{i}"}
+            for i in range(6)
+        ]
+        mock_config.ZOHO_ACCOUNTS = accounts
+        mock_config.TARGET_TIMEZONE = "America/New_York"
+        mock_config.GLOBAL_DAILY_TARGET = 300
+        mock_config.WARMUP_ENABLED = True
+        mock_config.WARMUP_WEEK1_LIMIT = 3
+        mock_config.WARMUP_WEEK2_LIMIT = 7
+        mock_config.WARMUP_WEEK3_LIMIT = 12
+        mock_config.WARMUP_WEEK4_LIMIT = 50
+        mock_config.EMAILS_PER_DAY_PER_MAILBOX = 100
+        mock_blocked.cleanup_expired.return_value = None
+        mock_blocked.is_blocked.return_value = False
+        # Account is 30 days old (week 5 → uses week 4 limit)
+        mock_stats.get_account_age_days.return_value = 30
+
+        pool = AccountPool()
+        limit = pool._get_daily_limit("user0@test.com")
+        # ceil(300/6) = 50, warmup week 4 = 50 → min(50, 50) = 50
+        self.assertEqual(limit, 50)
+
+    @patch("v2.account_pool.BlockedAccounts")
+    @patch("v2.account_pool.WarmDown.get_warmdown_limit", return_value=None)
+    @patch("v2.account_pool.SendingStats")
+    @patch("v2.account_pool.config")
+    def test_global_target_never_exceeds_zoho_500(self, mock_config, mock_stats, mock_wd, mock_blocked):
+        """Even with huge global target, per-account can't exceed Zoho's 500."""
+        from v2.account_pool import AccountPool
+
+        accounts = [{"email": "solo@test.com", "password": "p", "sender_name": "S"}]
+        mock_config.ZOHO_ACCOUNTS = accounts
+        mock_config.TARGET_TIMEZONE = "America/New_York"
+        mock_config.GLOBAL_DAILY_TARGET = 1000  # absurd, but test the cap
+        mock_config.WARMUP_ENABLED = False
+        mock_config.EMAILS_PER_DAY_PER_MAILBOX = 1000
+        mock_blocked.cleanup_expired.return_value = None
+        mock_blocked.is_blocked.return_value = False
+
+        pool = AccountPool()
+        limit = pool._get_daily_limit("solo@test.com")
+        self.assertEqual(limit, 500)  # Zoho hard cap
+
+    @patch("v2.account_pool.BlockedAccounts")
+    @patch("v2.account_pool.WarmDown")
+    @patch("v2.account_pool.SendingStats")
+    @patch("v2.account_pool.config")
+    def test_warmdown_takes_priority_over_global(self, mock_config, mock_stats, mock_wd_cls, mock_blocked):
+        """Warm-down limit always wins, even over global target."""
+        from v2.account_pool import AccountPool
+
+        accounts = [{"email": "wd@test.com", "password": "p", "sender_name": "W"}]
+        mock_config.ZOHO_ACCOUNTS = accounts
+        mock_config.TARGET_TIMEZONE = "America/New_York"
+        mock_config.GLOBAL_DAILY_TARGET = 300
+        mock_config.WARMUP_ENABLED = False
+        mock_config.EMAILS_PER_DAY_PER_MAILBOX = 100
+        mock_blocked.cleanup_expired.return_value = None
+        mock_wd_cls.get_warmdown_limit.return_value = 5  # recently unblocked
+
+        pool = AccountPool()
+        limit = pool._get_daily_limit("wd@test.com")
+        self.assertEqual(limit, 5)  # warm-down overrides everything
+
+    @patch("v2.account_pool.BlockedAccounts")
+    @patch("v2.account_pool.WarmDown.get_warmdown_limit", return_value=None)
+    @patch("v2.account_pool.SendingStats")
+    @patch("v2.account_pool.config")
+    def test_global_target_all_blocked_returns_zero(self, mock_config, mock_stats, mock_wd, mock_blocked):
+        """If all accounts are blocked, per-account limit from global target is 0."""
+        from v2.account_pool import AccountPool
+
+        accounts = [
+            {"email": f"user{i}@test.com", "password": "p", "sender_name": f"U{i}"}
+            for i in range(3)
+        ]
+        mock_config.ZOHO_ACCOUNTS = accounts
+        mock_config.TARGET_TIMEZONE = "America/New_York"
+        mock_config.GLOBAL_DAILY_TARGET = 300
+        mock_config.WARMUP_ENABLED = False
+        mock_config.EMAILS_PER_DAY_PER_MAILBOX = 100
+        mock_blocked.cleanup_expired.return_value = None
+        mock_blocked.is_blocked.return_value = True  # ALL blocked
+
+        pool = AccountPool()
+        limit = pool._get_daily_limit("user0@test.com")
+        self.assertEqual(limit, 0)
+
+    @patch("v2.account_pool.BlockedAccounts")
+    @patch("v2.account_pool.WarmDown.get_warmdown_limit", return_value=None)
+    @patch("v2.account_pool.SendingStats")
+    @patch("v2.account_pool.config")
+    def test_global_target_uneven_distribution(self, mock_config, mock_stats, mock_wd, mock_blocked):
+        """Uneven split rounds up: 300 across 7 accounts → ceil(42.8) = 43."""
+        from v2.account_pool import AccountPool
+
+        accounts = [
+            {"email": f"user{i}@test.com", "password": "p", "sender_name": f"U{i}"}
+            for i in range(7)
+        ]
+        mock_config.ZOHO_ACCOUNTS = accounts
+        mock_config.TARGET_TIMEZONE = "America/New_York"
+        mock_config.GLOBAL_DAILY_TARGET = 300
+        mock_config.WARMUP_ENABLED = False
+        mock_config.EMAILS_PER_DAY_PER_MAILBOX = 100
+        mock_blocked.cleanup_expired.return_value = None
+        mock_blocked.is_blocked.return_value = False
+
+        pool = AccountPool()
+        limit = pool._get_daily_limit("user0@test.com")
+        self.assertEqual(limit, 43)  # ceil(300/7) = 43
 
 
 if __name__ == "__main__":

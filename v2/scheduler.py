@@ -247,6 +247,20 @@ class AsyncScheduler:
                         name="reputation_refresh",
                     )
 
+                # ── Adaptive Campaign Check (every 2 hours during send window) ──
+                # Runs at: 09:00, 11:00, 13:00, 15:00
+                # Ensures we hit GLOBAL_DAILY_TARGET by fetching more leads if needed
+                if config.GLOBAL_DAILY_TARGET > 0:
+                    adaptive_hours = [9, 11, 13, 15]
+                    if current_hour in adaptive_hours and current_minute == 0:
+                        adaptive_key = f"adaptive_{today_str}_{current_hour}"
+                        if adaptive_key not in last_run_dates:
+                            last_run_dates[adaptive_key] = today_str
+                            asyncio.create_task(
+                                self._run_adaptive_campaign(),
+                                name=f"adaptive_campaign_{current_hour}",
+                            )
+
                 # ── Daily summary (at 17:00) ─────────────────────────
                 summary_key = f"summary_{today_str}"
                 if current_hour == 17 and current_minute == 0 and summary_key not in last_run_dates:
@@ -335,8 +349,48 @@ class AsyncScheduler:
                     AlertLevel.CRITICAL,
                 )
 
+    async def _run_adaptive_campaign(self):
+        """
+        Adaptive campaign runner — checks if we're on track for GLOBAL_DAILY_TARGET
+        and fetches more leads if needed (accounting for skips/bounces/DNC).
+        
+        CRITICAL: Also triggers pre-generation immediately after fetching leads
+        so drafts are ready to send (not waiting until 17:30).
+        """
+        try:
+            from adaptive_campaign import run_adaptive_campaign_check
+            
+            logger.info("Running adaptive campaign check...")
+            result = await asyncio.to_thread(run_adaptive_campaign_check)
+            
+            if result["status"] == "skipped":
+                logger.info(f"Adaptive campaign skipped: {result.get('reason')}")
+                return
+            elif result["status"] == "target_met":
+                logger.info(f"Daily target already met: {result.get('message')}")
+                return
+            
+            # Leads were fetched — now generate drafts immediately
+            logger.info(
+                f"Adaptive campaign completed: "
+                f"fetched {result.get('fetched_leads', 0)} leads, "
+                f"{result.get('sent_today', 0)}/{config.GLOBAL_DAILY_TARGET} sent today"
+            )
+            
+            # CRITICAL: Trigger pre-generation NOW so drafts are ready to send
+            logger.info("Triggering pre-generation for newly fetched leads...")
+            await self._run_pre_generation()
+            
+        except Exception as e:
+            logger.error(f"Adaptive campaign failed: {e}", exc_info=True)
+
     async def _run_pre_generation(self):
-        """Run pre-generation for upcoming campaigns."""
+        """
+        Run pre-generation for both initial emails and followups.
+        
+        CRITICAL: Must generate initial drafts for newly fetched leads,
+        not just followups for existing campaigns.
+        """
         logger.info("Starting pre-generation run")
 
         try:
@@ -346,15 +400,40 @@ class AsyncScheduler:
                 logger.info("No active campaigns for pre-generation")
                 return
 
-            total_stats = {"generated": 0, "failed": 0, "skipped": 0}
+            total_stats = {"generated": 0, "failed": 0, "skipped": 0, "initial": 0, "followups": 0}
 
             for campaign in active:
                 cid = str(campaign["_id"])
+                
+                # ── STEP 1: Generate INITIAL drafts for pending leads ──
+                # Get pending leads for this campaign (no email sent yet)
+                cm = self._get_campaign_manager()
+                pending = await asyncio.to_thread(cm.get_pending_leads, max_leads=200)
+                
+                # Filter to only this campaign's leads
+                campaign_leads = [
+                    l for l in pending 
+                    if str(l.get("campaign_id")) == cid
+                ]
+                
+                if campaign_leads:
+                    logger.info(f"Generating {len(campaign_leads)} initial drafts for campaign {cid}")
+                    initial_stats = await self.pre_generator.generate_initial_drafts(
+                        campaign_id=cid,
+                        leads=campaign_leads,
+                        max_rewrites=2
+                    )
+                    total_stats["initial"] += initial_stats.get("generated", 0)
+                    total_stats["generated"] += initial_stats.get("generated", 0)
+                    total_stats["failed"] += initial_stats.get("failed", 0)
+                    total_stats["skipped"] += initial_stats.get("skipped", 0)
 
-                # Generate follow-up drafts
-                stats = await self.pre_generator.generate_followup_drafts(cid)
-                for k in total_stats:
-                    total_stats[k] += stats.get(k, 0)
+                # ── STEP 2: Generate FOLLOWUP drafts ──
+                followup_stats = await self.pre_generator.generate_followup_drafts(cid)
+                total_stats["followups"] += followup_stats.get("generated", 0)
+                total_stats["generated"] += followup_stats.get("generated", 0)
+                total_stats["failed"] += followup_stats.get("failed", 0)
+                total_stats["skipped"] += followup_stats.get("skipped", 0)
 
             logger.info(
                 "Pre-generation complete",

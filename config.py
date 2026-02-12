@@ -97,6 +97,13 @@ EMAILS_PER_DAY_PER_MAILBOX = int(os.getenv("EMAILS_PER_DAY_PER_MAILBOX", "25"))
 MIN_DELAY_BETWEEN_EMAILS = int(os.getenv("MIN_DELAY_BETWEEN_EMAILS", "20"))  # minutes (was 7)
 MAX_DELAY_BETWEEN_EMAILS = int(os.getenv("MAX_DELAY_BETWEEN_EMAILS", "35"))  # minutes (was 12)
 
+# Global daily target (0 = disabled, uses per-mailbox limit only)
+# When set, distributes target evenly across active accounts.
+# Per-account limit = ceil(GLOBAL_DAILY_TARGET / active_accounts)
+# Still respects warmup/warm-down and never exceeds Zoho's 500/account hard cap.
+# Example: GLOBAL_DAILY_TARGET=300 with 6 accounts → 50/account/day
+GLOBAL_DAILY_TARGET = int(os.getenv("GLOBAL_DAILY_TARGET", "0"))
+
 # Warm-up Schedule (CRITICAL to avoid blocks)
 # Week 1: 3 emails/day/account
 # Week 2: 7 emails/day/account  

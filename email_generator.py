@@ -1575,6 +1575,16 @@ Remember:
         title = lead.get('title') or ''
         industry = lead.get('industry') or ''
         
+        # Guard: skip placeholder company names (Stealth Startup, etc.)
+        INVALID_COMPANY_NAMES = {
+            "stealth startup", "stealth mode", "stealth", "stealth company",
+            "undisclosed", "n/a", "none", "unknown", "confidential",
+            "private company", "stealth mode startup", "your company",
+        }
+        if company.lower().strip() in INVALID_COMPANY_NAMES:
+            print(f"   ⚠️ Skipping lead with placeholder company: '{company}'")
+            return None
+        
         # Build personalization context from enrichment
         has_real_data = research.get('source') == 'website_enrichment'
         conversation_starters = research.get('conversation_starters', [])
@@ -1626,15 +1636,21 @@ DO NOT fake observations like "saw you're hiring" or "noticed your growth"."""
         # RULE: Must sound like a FRIEND texting. NO company name. NO pitch hint.
         # They see this BEFORE opening. If it smells like a pitch, they delete.
         # NO EM DASHES, NO placeholders, NO company observations.
+        # NOTE: Do NOT include "hey {name}" here — draft_email already prepends it.
+        # Including it here causes doubled names like "hey john, hey john, random one."
         curiosity_openers = [
             "had a random thought.",
             "quick one.",
             "this might be out of left field.",
             "weird timing but had a thought.",
-            f"hey {first_name.lower()}, random one for you.",
+            "random one for you.",
             "been meaning to ask you something.",
             "random one.",
             "quick q.",
+            "something came to mind.",
+            "had a quick q.",
+            "honest question.",
+            "this might sound random.",
         ]
         suggested_opener = random.choice(curiosity_openers)
         
@@ -1644,11 +1660,14 @@ DO NOT fake observations like "saw you're hiring" or "noticed your growth"."""
             "worth a quick chat?",
             "ring any bells?",
             "crazy or worth exploring?",
-            "am I off base here?",
+            "am i off base here?",
             "make any sense?",
             "worth 15 mins?",
-            "curious if this resonates.",
+            "does this resonate?",
             "thoughts?",
+            "sound familiar?",
+            "is this even on your radar?",
+            "worth a look?",
         ]
         suggested_cta = random.choice(cta_options)
         
@@ -1726,21 +1745,56 @@ Return JSON: {{"subject": "2-3 word subject", "body": "line1\\n\\nline2\\n\\nlin
                 f"is {company}'s dev team spending more time on maintenance than new features right now? seems to be the pattern with a lot of {their_space or industry or 'tech'} companies scaling up.",
                 f"curious if {company} is tackling the build-vs-buy decision on infrastructure. it's a tough call when you're moving fast.",
                 f"is {company}'s engineering team stuck putting out fires instead of shipping new stuff? been seeing that a lot lately.",
+                f"how's {company} handling the talent crunch? every cto i talk to in {their_space or industry or 'tech'} says hiring senior devs takes 6+ months now.",
+                f"is {company} running into the classic problem where adding more engineers actually slows things down? brooks's law hits hard at your stage.",
+                f"curious — does {company} have a clear picture of where the bottleneck is in your release cycle? most {their_space or industry or 'tech'} teams i talk to are guessing.",
+                f"is {company}'s team drowning in incidents that keep pulling them off the roadmap? seems like every growing {their_space or industry or 'tech'} company hits that wall.",
+                f"random question — is {company} still deploying the same way you did two years ago? most ctos i know haven't had time to fix what's under the hood.",
             ],
             'VP Engineering': [
                 f"is {company}'s team hitting a wall trying to ship faster without adding headcount? seems to be the story everywhere right now.",
                 f"curious how {company} is handling tech debt vs feature deadlines. it's usually a pick-one situation that nobody likes.",
                 f"is {company}'s roadmap getting squeezed because the team's stretched? i keep hearing that from engineering leads in {their_space or industry or 'tech'}.",
+                f"does {company} have that problem where every sprint starts ambitious and ends with half the tickets pushed to next week? you're not alone.",
+                f"curious — is {company}'s team spending more time in meetings about work than actually doing the work? it's the silent killer for {their_space or industry or 'tech'} teams.",
+                f"is {company} struggling to onboard new engineers without slowing down the senior devs? that's the hidden cost of growing fast.",
+                f"honest question — does {company}'s team actually trust the test suite, or do deploys still feel like a gamble? no judgment either way.",
+                f"is {company} at the point where 'move fast and break things' is starting to catch up with you? that pivot is tough for {their_space or industry or 'tech'} teams.",
             ],
             'CEO': [
                 f"is {company} at that stage where the tech side can't keep pace with the business? i see that a lot with {their_space or industry or 'tech'} companies growing fast.",
                 f"curious if {company} is feeling the drag from manual processes. it's one of those things that sneaks up when you're focused on growth.",
                 f"is {company} at that ceiling where you need to ship faster but can't hire fast enough? seems to be the number one thing for {their_space or industry or 'tech'} companies right now.",
+                f"does {company} have full visibility into what's actually slowing down your engineering output? most ceos i talk to say it's a black box.",
+                f"curious — is {company}'s growth outpacing what your current tech stack can handle? that inflection point creeps up fast in {their_space or industry or 'tech'}.",
+                f"is {company} burning runway on engineering hours that don't move the needle? it's the thing nobody wants to talk about but every {their_space or industry or 'tech'} ceo deals with.",
+                f"quick question — does {company} have a clear handle on engineering costs per feature? the ceos who do are usually way ahead of their competitors.",
+                f"is {company} at the point where every new customer win creates more strain than revenue? that's the growth trap a lot of {their_space or industry or 'tech'} companies fall into.",
             ],
             'Founder': [
                 f"is {company} at the crossroads of fixing old stuff vs building new things? that's usually where founders in {their_space or industry or 'tech'} land.",
                 f"curious if {company} is dealing with the founder dilemma of speed vs quality. it never gets easier, especially at your stage.",
                 f"is {company}'s team buried in tech debt while trying to ship the next big thing? seems to be the pattern with fast-growing companies in your space.",
+                f"does {company} have a reliable way to estimate how long features actually take? every founder i know in {their_space or industry or 'tech'} says estimation is their biggest headache.",
+                f"curious — is {company} still in the phase where you're wearing the technical hat too? at some point that stops scaling, and it's hard to know when.",
+                f"is {company} feeling the pain of early decisions that made sense at the time but are now slowing you down? every {their_space or industry or 'tech'} founder hits that.",
+                f"honest question — does {company}'s team have enough bandwidth to build what your customers are actually asking for? or is it all catch-up right now?",
+                f"is {company} at the stage where you need enterprise-grade reliability but still have a startup-sized team? that gap is brutal in {their_space or industry or 'tech'}.",
+            ],
+            'VP Product': [
+                f"is {company}'s product roadmap getting hijacked by engineering constraints? seems like every vp product in {their_space or industry or 'tech'} is fighting that battle.",
+                f"curious — does {company} have a backlog of features that customers keep asking for but engineering can't get to? that tension is everywhere right now.",
+                f"is {company}'s time-to-market on new features where you want it to be? most product leaders in {their_space or industry or 'tech'} tell me it's 2-3x slower than it should be.",
+            ],
+            'Director of Engineering': [
+                f"is {company}'s team spending more time on keep-the-lights-on work than innovation? directors of engineering in {their_space or industry or 'tech'} tell me it's usually 70/30 the wrong way.",
+                f"curious — is {company} struggling to maintain velocity as the team scales? that's the part nobody warns you about when you go from 10 to 50 engineers.",
+                f"does {company} have a handle on developer experience, or is tooling slowing everyone down? it's the thing most {their_space or industry or 'tech'} teams under-invest in.",
+            ],
+            'Head of Engineering': [
+                f"is {company}'s engineering org feeling the growing pains right now? every head of eng i talk to in {their_space or industry or 'tech'} says the same thing.",
+                f"curious — is {company} at the point where process overhead is eating into actual build time? that tipping point sneaks up on {their_space or industry or 'tech'} teams.",
+                f"does {company} have clear eng metrics, or is it more of a gut-feel situation? no shame either way — most {their_space or industry or 'tech'} companies are still figuring this out.",
             ],
         }
         # Get role-specific questions or default
@@ -1970,6 +2024,9 @@ Return JSON: {{"subject": "{suggested_subject}", "body": "line1\\n\\nline2\\n\\n
             subject = humanize_email(subject)
             body = humanize_email(body)
             
+            # ── Shared post-processing: paragraph breaks, signature, CTA, self-addressing ──
+            body = self._postprocess_body(body, first_name)
+            
             return {
                 "subject": subject,
                 "body": body,
@@ -2080,6 +2137,92 @@ Return JSON: {{"subject": "{suggested_subject}", "body": "line1\\n\\nline2\\n\\n
         # Log warnings
         for issue in issues:
             print(f"⚠️  VALIDATION WARNING: {issue}")
+        
+        return body
+    
+    def _postprocess_body(self, body: str, first_name: str, is_followup: bool = False) -> str:
+        """
+        Shared post-processing for ALL email types (initial + followups).
+        Enforces paragraph breaks, signature, CTA question mark, and fixes self-addressing.
+        """
+        if not body:
+            return body
+        
+        sender_names = ["abdul", "abdulrehman", "ali", "usama", "bilal"]
+        
+        # ── FIX: Prevent self-addressing ──
+        first_line = body.split('\n')[0].lower().strip()
+        for sname in sender_names:
+            if sname != first_name.lower() and f"hey {sname}" in first_line:
+                body = body.replace(f"hey {sname}", f"hey {first_name.lower()}", 1)
+                body = body.replace(f"Hey {sname}", f"hey {first_name.lower()}", 1)
+                body = body.replace(f"Hey {sname.title()}", f"hey {first_name.lower()}", 1)
+                break
+        
+        # ── FIX: Enforce paragraph breaks ──
+        non_empty = [l for l in body.split('\n') if l.strip()]
+        blank_count = body.count('\n\n')
+        if blank_count < 2 and len(non_empty) >= 3:
+            rebuilt = []
+            for j, line in enumerate(non_empty):
+                ll = line.strip().lower()
+                if j > 0:
+                    if 'we helped' in ll or 'helped a' in ll or 'helped an' in ll:
+                        if not rebuilt or rebuilt[-1] != '':
+                            rebuilt.append('')
+                    elif any(cta in ll for cta in [
+                        'worth', 'thoughts?', 'ring any', 'crazy or', 'am i off',
+                        'make any sense', 'does this resonate', 'sound familiar',
+                        'is this even', 'worth a look', 'abdul'
+                    ]):
+                        if not rebuilt or rebuilt[-1] != '':
+                            rebuilt.append('')
+                    elif j == len(non_empty) - 1 and len(line.split()) <= 6:
+                        if not rebuilt or rebuilt[-1] != '':
+                            rebuilt.append('')
+                rebuilt.append(line)
+            body = '\n'.join(rebuilt)
+        
+        # If body is ALL on one line, force split
+        if '\n' not in body and len(body.split()) > 15:
+            sentences = re.split(r'(?<=[.?!])\s+', body)
+            if len(sentences) >= 3:
+                cs_idx = next((i for i, s in enumerate(sentences)
+                               if 'we helped' in s.lower() or 'helped a' in s.lower()), None)
+                if cs_idx and cs_idx > 0:
+                    part1 = ' '.join(sentences[:cs_idx])
+                    part2 = sentences[cs_idx]
+                    part3 = ' '.join(sentences[cs_idx+1:])
+                    body = f"{part1}\n\n{part2}\n\n{part3}"
+                else:
+                    mid1 = len(sentences) // 3
+                    mid2 = 2 * len(sentences) // 3
+                    if mid1 > 0 and mid2 > mid1:
+                        p1 = ' '.join(sentences[:mid1])
+                        p2 = ' '.join(sentences[mid1:mid2])
+                        p3 = ' '.join(sentences[mid2:])
+                        body = f"{p1}\n\n{p2}\n\n{p3}"
+        
+        # ── FIX: Enforce signature ──
+        body_stripped = body.rstrip()
+        last_line = body_stripped.split('\n')[-1].strip().lower() if body_stripped else ""
+        has_signoff = any(name in last_line for name in sender_names)
+        if not has_signoff:
+            body = body_stripped + "\nabdul"
+        
+        # ── FIX: Ensure CTA ends with question mark ──
+        lines = body.split('\n')
+        for idx in range(len(lines) - 1, -1, -1):
+            stripped = lines[idx].strip()
+            if stripped and stripped.lower() not in sender_names and stripped != '':
+                if not stripped.endswith('?') and len(stripped.split()) <= 8:
+                    lines[idx] = stripped.rstrip('.') + '?'
+                break
+        body = '\n'.join(lines)
+        
+        # ── FIX: Remove em dashes ──
+        body = body.replace('—', ',')
+        body = body.replace('–', ',')
         
         return body
     
@@ -2370,9 +2513,8 @@ Return JSON: {{"body": "..."}}"""
                         body = body.replace(clean, company)
                         break
             
-            # Remove em dashes
-            body = body.replace('—', ',')
-            body = body.replace('–', ',')
+            # Shared post-processing: paragraph breaks, signature, CTA, self-addressing
+            body = self._postprocess_body(body, first_name, is_followup=True)
             
             return {
                 "subject": f"Re: {original_subject}",
@@ -2573,9 +2715,8 @@ Return JSON: {{"body": "..."}}"""
                         body = body.replace(clean, company)
                         break
             
-            # Remove em dashes
-            body = body.replace('—', ',')
-            body = body.replace('–', ',')
+            # Shared post-processing: paragraph breaks, signature, CTA, self-addressing
+            body = self._postprocess_body(body, first_name, is_followup=True)
             
             return {
                 "subject": new_subject,

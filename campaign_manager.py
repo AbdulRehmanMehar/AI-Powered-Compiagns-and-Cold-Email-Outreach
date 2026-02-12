@@ -146,9 +146,17 @@ class CampaignManager:
             "email_invalid": {"$ne": True}
         }
         
+        # Placeholder company names that indicate incomplete lead data
+        INVALID_COMPANY_NAMES = {
+            "stealth startup", "stealth mode", "stealth", "stealth company",
+            "undisclosed", "n/a", "none", "unknown", "confidential",
+            "private company", "stealth mode startup",
+        }
+        
         for lead in leads_collection.find(query).sort("created_at", 1).limit(max_leads * 3):
             lead_id = str(lead["_id"])
             email = lead.get("email", "")
+            company = (lead.get("company") or lead.get("company_name") or "").strip()
             
             # Skip if already contacted
             if lead_id in sent_lead_ids:
@@ -158,6 +166,9 @@ class CampaignManager:
                 continue
             # Skip if in do-not-contact list
             if DoNotContact.is_blocked(email):
+                continue
+            # Skip placeholder company names (e.g. from Harmonic.AI/RocketReach)
+            if company.lower() in INVALID_COMPANY_NAMES or not company:
                 continue
                 
             pending_leads.append(lead)

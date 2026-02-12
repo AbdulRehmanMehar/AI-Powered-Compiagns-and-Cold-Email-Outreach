@@ -275,10 +275,11 @@ class TestProcessOneDraft(unittest.TestCase):
 class TestSendWorkerRunLoop(unittest.TestCase):
     """Test the main run loop behavior."""
 
+    @patch("v2.send_worker.asyncio.sleep", new_callable=AsyncMock)
     @patch("v2.send_worker.EmailDraft")
     @patch("v2.send_worker.is_holiday")
     @patch("v2.send_worker.config")
-    def test_holiday_skips_sending(self, mock_config, mock_holiday, mock_draft):
+    def test_holiday_skips_sending(self, mock_config, mock_holiday, mock_draft, mock_sleep):
         from v2.send_worker import SendWorker
 
         mock_config.ZOHO_SMTP_HOST = "smtp.test.com"
@@ -288,15 +289,18 @@ class TestSendWorkerRunLoop(unittest.TestCase):
         mock_pool = MagicMock()
         worker = SendWorker(mock_pool)
 
-        # Simulate: holiday detected, then shutdown
-        async def run_test():
-            async def delayed_shutdown():
-                await asyncio.sleep(0.1)
-                worker.request_shutdown()
-            asyncio.create_task(delayed_shutdown())
-            await worker.run()
+        # Shut down after first sleep call
+        call_count = 0
 
-        run_async(run_test())
+        async def fake_sleep(seconds):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 1:
+                worker.request_shutdown()
+
+        mock_sleep.side_effect = fake_sleep
+
+        run_async(worker.run())
         # Worker should have exited cleanly
         self.assertTrue(worker._shutdown.is_set())
 

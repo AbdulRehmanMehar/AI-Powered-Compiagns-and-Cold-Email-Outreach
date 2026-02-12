@@ -12,6 +12,7 @@ claiming even if multiple processes share the same DB.
 
 import asyncio
 import logging
+import math
 import random
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -274,35 +275,86 @@ class AccountPool:
         return self._locks[account_email]
 
     def _get_daily_limit(self, account_email: str) -> int:
-        """Get daily limit considering warmup + warm-down."""
-        # Check warm-down first
+        """
+        Get daily limit considering warmup + warm-down + global target.
+
+        Priority order:
+        1. Warm-down limit (if recently unblocked) — always wins
+        2. Warmup limit (if account is young) — caps the account
+        3. Global target distribution (if GLOBAL_DAILY_TARGET > 0)
+        4. EMAILS_PER_DAY_PER_MAILBOX fallback
+
+        The final limit is also hard-capped at 500 (Zoho's absolute max).
+        """
+        ZOHO_HARD_CAP = 500
+
+        # Check warm-down first (recently unblocked accounts)
         wd_limit = WarmDown.get_warmdown_limit(account_email)
         if wd_limit is not None:
             return wd_limit
 
-        # Normal warmup logic (mirrors ZohoEmailSender._get_daily_limit_for_account)
-        if not config.WARMUP_ENABLED:
-            return config.EMAILS_PER_DAY_PER_MAILBOX
+        # Warmup limit (for young accounts)
+        warmup_limit = None
+        if config.WARMUP_ENABLED:
+            age_days = SendingStats.get_account_age_days(account_email)
+            week = (age_days // 7) + 1
 
-        age_days = SendingStats.get_account_age_days(account_email)
-        week = (age_days // 7) + 1
+            warmup_limits = {
+                1: config.WARMUP_WEEK1_LIMIT,
+                2: config.WARMUP_WEEK2_LIMIT,
+                3: config.WARMUP_WEEK3_LIMIT,
+                4: config.WARMUP_WEEK4_LIMIT,
+            }
 
-        warmup_limits = {
-            1: config.WARMUP_WEEK1_LIMIT,
-            2: config.WARMUP_WEEK2_LIMIT,
-            3: config.WARMUP_WEEK3_LIMIT,
-            4: config.WARMUP_WEEK4_LIMIT,
-        }
+            if week >= 4:
+                warmup_limit = warmup_limits[4]
+            else:
+                warmup_limit = warmup_limits.get(week, warmup_limits[1])
 
-        if week >= 4:
-            limit = warmup_limits[4]
+        # Global target distribution
+        if config.GLOBAL_DAILY_TARGET > 0:
+            active_count = len([
+                a for a in self.accounts
+                if not BlockedAccounts.is_blocked(a["email"])
+            ])
+            if active_count > 0:
+                per_account_from_target = math.ceil(config.GLOBAL_DAILY_TARGET / active_count)
+            else:
+                per_account_from_target = 0
+
+            # Start from the global-derived limit
+            limit = per_account_from_target
+
+            # Warmup still constrains young accounts
+            if warmup_limit is not None:
+                limit = min(limit, warmup_limit)
+
+            # Never exceed Zoho's hard cap
+            final = min(limit, ZOHO_HARD_CAP)
+
+            logger.debug(
+                "daily_limit_calculated",
+                extra={
+                    "account": account_email,
+                    "global_target": config.GLOBAL_DAILY_TARGET,
+                    "active_accounts": active_count,
+                    "per_account_from_target": per_account_from_target,
+                    "warmup_limit": warmup_limit,
+                    "final": final,
+                },
+            )
+            return final
+
+        # No global target — use legacy per-mailbox cap
+        if warmup_limit is not None:
+            final = min(warmup_limit, config.EMAILS_PER_DAY_PER_MAILBOX)
         else:
-            limit = warmup_limits.get(week, warmup_limits[1])
+            final = config.EMAILS_PER_DAY_PER_MAILBOX
 
-        final = min(limit, config.EMAILS_PER_DAY_PER_MAILBOX)
+        final = min(final, ZOHO_HARD_CAP)
         logger.debug(
             "daily_limit_calculated",
-            extra={"account": account_email, "week": week, "warmup_limit": limit, "final": final},
+            extra={"account": account_email, "warmup_limit": warmup_limit, "final": final},
         )
         return final
 

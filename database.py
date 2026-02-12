@@ -500,6 +500,14 @@ class Email:
         }).sort("created_at", 1))
     
     @staticmethod
+    def count_sent_since(since_datetime: datetime) -> int:
+        """Count emails sent since a specific datetime."""
+        return emails_collection.count_documents({
+            "status": Email.STATUS_SENT,
+            "sent_at": {"$gte": since_datetime}
+        })
+    
+    @staticmethod
     def get_icp_analytics(campaign_id: str = None) -> Dict[str, Any]:
         """
         Get ICP performance analytics (TK Kader Framework).

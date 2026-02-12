@@ -3,6 +3,35 @@
 ## Project Context
 This is an autonomous cold email outreach system using AI-powered email generation, RocketReach for lead discovery, and multi-account Zoho for sending. The system uses MongoDB for data persistence and follows expert cold email strategies.
 
+## CRITICAL: System Architecture Rules
+
+### MongoDB is the Source of Truth
+**NEVER assume configuration comes from JSON files. ALL configuration is in MongoDB:**
+
+- ✅ **Campaign configuration**: `campaigns` collection in MongoDB
+- ✅ **Scheduler config**: `scheduler_config` collection in MongoDB  
+- ✅ **Lead data**: `leads` collection in MongoDB
+- ✅ **Email records**: `emails` collection in MongoDB
+- ✅ **Account reputation**: `account_reputation` collection in MongoDB
+- ❌ **NOT** scheduler_config.json (this is legacy/example only)
+
+**Before making assumptions about how campaigns work:**
+1. Check `db.campaigns.find()` for campaign configuration
+2. Check `db.scheduler_config.find_one({'_id': 'default'})` for schedule
+3. Never read scheduler_config.json as if it's the active config
+
+### Lead Pipeline & Skip Logic
+The system automatically skips leads that are:
+- In do-not-contact list (DNC)
+- Previously bounced (`email_invalid: true`)
+- Failed email verification (MX/SMTP)
+- Already contacted
+- "Stealth Startup" or placeholder company names
+
+**When implementing features that depend on lead counts:**
+- Account for ~20-30% skip rate due to verification/DNC/bounces
+- If target is 300 emails/day, system needs to fetch 400+ leads to account for skips
+
 ## Core Development Guidelines
 
 ### 1. Virtual Environment Management

@@ -27,6 +27,7 @@ from database import (
     emails_collection,
     leads_collection,
 )
+from email_verifier import EmailVerifier, VerificationStatus
 
 logger = logging.getLogger("coldemails.pre_generator")
 
@@ -320,6 +321,49 @@ class PreGenerator:
             if Email.has_been_contacted_by_email(to_email):
                 stats["skipped"] += 1
                 continue
+
+            # ── EMAIL VERIFICATION: Skip invalid emails BEFORE generating ──
+            # Check if lead is already marked invalid
+            if lead.get("email_invalid"):
+                stats["skipped"] += 1
+                logger.debug(f"Skipping {to_email} — already marked invalid")
+                continue
+
+            # Check if we have recent verification (within 7 days)
+            verification_date = lead.get("verification_date")
+            needs_reverify = True
+            if verification_date:
+                age_days = (datetime.now() - verification_date).days
+                if age_days <= 7 and lead.get("verification_status") == "valid":
+                    needs_reverify = False
+
+            if needs_reverify:
+                # Verify email deliverability
+                try:
+                    verifier = EmailVerifier(smtp_timeout=10, skip_smtp_verify=False)
+                    verification = verifier.verify(to_email)
+                    
+                    # Store verification results
+                    Lead.update_verification_status(
+                        lead_id=lead_id,
+                        verification_status=verification.status.value,
+                        verification_score=verification.score,
+                        verification_reason=verification.reason,
+                        verification_checks=verification.checks
+                    )
+                    
+                    # Skip invalid emails
+                    if verification.status == VerificationStatus.INVALID:
+                        logger.info(f"Skipping {to_email} — failed verification: {verification.reason}")
+                        Lead.mark_invalid_email(lead_id, f"Verification failed: {verification.reason}")
+                        stats["skipped"] += 1
+                        continue
+                    elif verification.status == VerificationStatus.RISKY:
+                        logger.warning(f"Risky email {to_email}: {verification.reason}")
+                        # Continue but log warning
+                except Exception as e:
+                    logger.error(f"Verification failed for {to_email}: {e}")
+                    # Don't skip on verification error — might be network issue
 
             try:
                 # Create placeholder draft

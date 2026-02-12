@@ -141,6 +141,7 @@ class TestAccountAcquireRelease(unittest.TestCase):
         mock_config.SEND_ON_WEEKENDS = True
         mock_config.EMAILS_PER_DAY_PER_MAILBOX = 25
         mock_config.WARMUP_ENABLED = False
+        mock_config.GLOBAL_DAILY_TARGET = 0
         mock_blocked.cleanup_expired.return_value = None
         mock_blocked.is_blocked.return_value = False
         mock_stats.get_sends_today.return_value = 5
@@ -298,6 +299,7 @@ class TestSchedulerLifecycle(unittest.TestCase):
         mock_config.SENDING_HOUR_END = 17
         mock_config.EMAILS_PER_DAY_PER_MAILBOX = 25
         mock_config.WARMUP_ENABLED = False
+        mock_config.GLOBAL_DAILY_TARGET = 0
 
         mock_blocked.cleanup_expired.return_value = None
         mock_holiday.return_value = (False, None)
@@ -330,6 +332,7 @@ class TestSchedulerLifecycle(unittest.TestCase):
         mock_config.SENDING_HOUR_END = 17
         mock_config.EMAILS_PER_DAY_PER_MAILBOX = 25
         mock_config.WARMUP_ENABLED = False
+        mock_config.GLOBAL_DAILY_TARGET = 0
         mock_blocked.cleanup_expired.return_value = None
 
         scheduler = AsyncScheduler()

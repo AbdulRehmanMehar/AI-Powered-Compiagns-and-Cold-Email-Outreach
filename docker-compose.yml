@@ -25,7 +25,11 @@ services:
       - GROQ_MODEL=${GROQ_MODEL}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
-      - SCHEDULER_MODE=async   
+      - SCHEDULER_MODE=async
+      - GLOBAL_DAILY_TARGET=${GLOBAL_DAILY_TARGET:-0}
+      - EMAILS_PER_DAY_PER_MAILBOX=${EMAILS_PER_DAY_PER_MAILBOX:-25}
+      - MIN_DELAY_BETWEEN_EMAILS=${MIN_DELAY_BETWEEN_EMAILS:-20}
+      - MAX_DELAY_BETWEEN_EMAILS=${MAX_DELAY_BETWEEN_EMAILS:-35}
     healthcheck:
       test: ["CMD", "python", "-c", "from database import campaigns_collection; print('healthy') if campaigns_collection.database.client.server_info() else exit(1)"]
       interval: 30s
