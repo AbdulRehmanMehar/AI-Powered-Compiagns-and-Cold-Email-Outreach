@@ -104,16 +104,17 @@ def is_holiday(target_date: date = None) -> Tuple[bool, Optional[str]]:
 
 # Multiplier applied to the base cooldown at different hours of the day.
 # Higher multiplier = longer delays = fewer emails.
-# Pattern: busy morning → slow lunch → moderate afternoon → wind-down
+# Pattern: mild variation to stay human-like without destroying throughput.
+# Old values (1.2/2.0/1.3/1.5) cut capacity by ~40%. Flattened to max 1.15.
 TIME_OF_DAY_MULTIPLIERS = {
     9: 1.0,    # 09:00-10:00 — Fresh start, normal pace
     10: 1.0,   # 10:00-11:00 — Still energetic
-    11: 1.2,   # 11:00-12:00 — Slowing toward lunch
-    12: 2.0,   # 12:00-13:00 — Lunch break, half speed
-    13: 1.3,   # 13:00-14:00 — Post-lunch slow
+    11: 1.05,  # 11:00-12:00 — Slight pre-lunch slowdown
+    12: 1.15,  # 12:00-13:00 — Lunch — mild slow, not a dead hour
+    13: 1.05,  # 13:00-14:00 — Post-lunch, nearly normal
     14: 1.0,   # 14:00-15:00 — Back to normal
     15: 1.0,   # 15:00-16:00 — Afternoon push
-    16: 1.5,   # 16:00-17:00 — Winding down
+    16: 1.1,   # 16:00-17:00 — Slight wind-down
 }
 
 
@@ -157,7 +158,8 @@ def get_human_cooldown_minutes() -> int:
     Combines:
     1. Base cooldown from config (MIN/MAX delay)
     2. Time-of-day multiplier
-    3. Gaussian jitter
+    3. Bounce-rate slowdown multiplier (auto-throttle if bounces spike)
+    4. Gaussian jitter
 
     Returns:
         Cooldown in minutes

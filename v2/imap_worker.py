@@ -27,8 +27,18 @@ from database import (
     DoNotContact,
     Email,
     Lead,
+    db,
     emails_collection,
     leads_collection,
+)
+
+# Track processed IMAP message UIDs to prevent double-detection of bounces/replies
+_processed_uids_collection = db["imap_processed_uids"]
+_processed_uids_collection.create_index(
+    [("account_email", 1), ("uid", 1)], unique=True
+)
+_processed_uids_collection.create_index(
+    "processed_at", expireAfterSeconds=60 * 60 * 24 * 14  # auto-delete after 14 days
 )
 
 logger = logging.getLogger("coldemails.imap_worker")
@@ -242,8 +252,20 @@ def _check_account_replies(
             },
         )
 
+        # Fetch UIDs for deduplication (so we don't re-process the same messages)
+        uid_status, uid_data = mail.uid("search", None, f"(SINCE {since_date})")
+        uid_list = uid_data[0].split() if uid_status == "OK" and uid_data[0] else []
+        uid_map = dict(zip(email_ids, uid_list))  # seq_num → UID
+
         for eid in email_ids:
             try:
+                # Skip already-processed messages
+                msg_uid = uid_map.get(eid, eid).decode("utf-8", errors="ignore") if isinstance(uid_map.get(eid, eid), bytes) else str(uid_map.get(eid, eid))
+                if _processed_uids_collection.find_one(
+                    {"account_email": account["email"], "uid": msg_uid}
+                ):
+                    continue
+
                 status, msg_data = mail.fetch(eid, "(RFC822)")
                 if status != "OK":
                     continue
@@ -253,79 +275,87 @@ def _check_account_replies(
                 subject = _decode_subject(msg.get("Subject", ""))
                 body = _get_email_body(msg)
 
+                # ── Classify and handle the message ──
+
                 if from_addr not in sent_to_addresses:
                     # Check for bounces even if not from a lead
                     _check_for_bounce(
                         from_addr, subject, body, result
                     )
-                    continue
 
-                # Already on DNC
-                if DoNotContact.is_blocked(from_addr):
-                    continue
+                elif DoNotContact.is_blocked(from_addr):
+                    pass  # Already on DNC, nothing to do
 
-                lead = Lead.get_by_email(from_addr)
-                if not lead:
-                    continue
+                else:
+                    lead = Lead.get_by_email(from_addr)
+                    if lead:
+                        # Auto-reply check
+                        is_ar, is_permanent = _is_auto_reply(subject, body)
+                        if is_ar:
+                            result["auto_replies"] += 1
+                            if is_permanent:
+                                if DoNotContact.add(
+                                    from_addr,
+                                    DoNotContact.REASON_AUTO_REPLY,
+                                    f"Auto-reply: {subject[:100]}",
+                                ):
+                                    result["dnc_added"] += 1
+                                logger.info(f"Permanent OOO from {from_addr}")
+                            else:
+                                logger.info(f"Temp OOO from {from_addr}")
 
-                # Auto-reply check
-                is_ar, is_permanent = _is_auto_reply(subject, body)
-                if is_ar:
-                    result["auto_replies"] += 1
-                    if is_permanent:
-                        if DoNotContact.add(
-                            from_addr,
-                            DoNotContact.REASON_AUTO_REPLY,
-                            f"Auto-reply: {subject[:100]}",
-                        ):
-                            result["dnc_added"] += 1
-                        logger.info(f"Permanent OOO from {from_addr}")
-                    else:
-                        logger.info(f"Temp OOO from {from_addr}")
-                    continue
+                        # Unsubscribe check
+                        elif _is_unsubscribe_request(subject, body):
+                            result["unsubscribes"] += 1
+                            if DoNotContact.add(
+                                from_addr,
+                                DoNotContact.REASON_UNSUBSCRIBE,
+                                f"Unsubscribe: {subject[:100]}",
+                            ):
+                                result["dnc_added"] += 1
+                            logger.info(f"Unsubscribe from {from_addr}")
 
-                # Unsubscribe check
-                if _is_unsubscribe_request(subject, body):
-                    result["unsubscribes"] += 1
-                    if DoNotContact.add(
-                        from_addr,
-                        DoNotContact.REASON_UNSUBSCRIBE,
-                        f"Unsubscribe: {subject[:100]}",
-                    ):
-                        result["dnc_added"] += 1
-                    logger.info(f"Unsubscribe from {from_addr}")
-                    continue
+                        else:
+                            # Real reply!
+                            result["replies"] += 1
+                            update_result = emails_collection.update_many(
+                                {
+                                    "lead_id": lead["_id"],
+                                    "status": {"$ne": Email.STATUS_REPLIED},
+                                },
+                                {
+                                    "$set": {
+                                        "status": Email.STATUS_REPLIED,
+                                        "replied_at": datetime.utcnow(),
+                                    }
+                                },
+                            )
+                            if update_result.modified_count > 0:
+                                campaign_emails = emails_collection.find(
+                                    {"lead_id": lead["_id"]}
+                                )
+                                for ce in campaign_emails:
+                                    Campaign.increment_stat(
+                                        str(ce["campaign_id"]), "emails_replied"
+                                    )
+                            logger.info(
+                                "reply_detected",
+                                extra={
+                                    "from": from_addr,
+                                    "subject": subject[:50],
+                                    "account": account["email"],
+                                },
+                            )
 
-                # Real reply!
-                result["replies"] += 1
-                update_result = emails_collection.update_many(
-                    {
-                        "lead_id": lead["_id"],
-                        "status": {"$ne": Email.STATUS_REPLIED},
-                    },
-                    {
-                        "$set": {
-                            "status": Email.STATUS_REPLIED,
-                            "replied_at": datetime.utcnow(),
-                        }
-                    },
-                )
-                if update_result.modified_count > 0:
-                    campaign_emails = emails_collection.find(
-                        {"lead_id": lead["_id"]}
+                # ── Mark this UID as processed (ALL paths) ──
+                try:
+                    _processed_uids_collection.update_one(
+                        {"account_email": account["email"], "uid": msg_uid},
+                        {"$set": {"processed_at": datetime.utcnow()}},
+                        upsert=True,
                     )
-                    for ce in campaign_emails:
-                        Campaign.increment_stat(
-                            str(ce["campaign_id"]), "emails_replied"
-                        )
-                logger.info(
-                    "reply_detected",
-                    extra={
-                        "from": from_addr,
-                        "subject": subject[:50],
-                        "account": account["email"],
-                    },
-                )
+                except Exception:
+                    pass  # duplicate key is fine
 
             except Exception as e:
                 # Skip individual email parse errors silently

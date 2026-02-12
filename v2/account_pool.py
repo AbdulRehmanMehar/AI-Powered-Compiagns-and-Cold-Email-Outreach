@@ -472,12 +472,24 @@ class AccountPool:
         """
         Record a successful send — update stats, cooldown, domain tracker.
         Called AFTER the SMTP send succeeds.
+        
+        Bounce-aware: If the account's recent bounce rate is elevated,
+        automatically lengthens the cooldown to slow down and protect reputation.
         """
         # Increment daily counter (atomic $inc)
         SendingStats.increment_send(account_email)
 
-        # Set human-like cooldown
+        # Set human-like cooldown, then apply bounce-rate slowdown if needed
         cooldown_min = get_human_cooldown_minutes()
+        
+        # Check recent bounce rate for this account and auto-throttle
+        saved_rep = AccountReputation.get_saved_score(account_email)
+        if saved_rep and saved_rep.get("bounce_rate", 0) > 0.03:
+            from v2.human_behavior import get_bounce_slowdown_multiplier
+            slowdown = get_bounce_slowdown_multiplier(saved_rep["bounce_rate"])
+            if slowdown > 1.0:
+                cooldown_min = int(cooldown_min * slowdown)
+        
         AccountCooldown.record_send(account_email, cooldown_min)
 
         # Track recipient domain

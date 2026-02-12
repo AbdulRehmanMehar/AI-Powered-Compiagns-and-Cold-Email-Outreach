@@ -65,6 +65,11 @@ ZOHO_IMAP_PORT = int(os.getenv("ZOHO_IMAP_PORT", "993"))
 EMAIL_ROTATION_STRATEGY = os.getenv("EMAIL_ROTATION_STRATEGY", "round-robin")  # "round-robin" or "random"
 EMAILS_PER_ACCOUNT = int(os.getenv("EMAILS_PER_ACCOUNT", "5"))
 
+# Domain throttling — max emails to a single recipient domain per day
+# Prevents sending too many emails to the same company/ESP in one day
+# With 300/day target, 3 is too tight for diverse domains — 5 is a safer default
+MAX_EMAILS_PER_RECIPIENT_DOMAIN = int(os.getenv("MAX_EMAILS_PER_RECIPIENT_DOMAIN", "5"))
+
 # Legacy single account support (for backward compatibility)
 ZOHO_EMAIL = ZOHO_ACCOUNTS[0]["email"] if ZOHO_ACCOUNTS else ""
 ZOHO_PASSWORD = ZOHO_ACCOUNTS[0]["password"] if ZOHO_ACCOUNTS else ""
@@ -92,10 +97,10 @@ VERIFY_SMTP = True  # Always do SMTP verification (catches invalid mailboxes)
 SKIP_ROLE_BASED_EMAILS = os.getenv("SKIP_ROLE_BASED_EMAILS", "true").lower() == "true"
 SKIP_PROBLEMATIC_TLDS = os.getenv("SKIP_PROBLEMATIC_TLDS", "true").lower() == "true"
 
-# Sending limits (Expert advice: 20-30 per mailbox per day)
-EMAILS_PER_DAY_PER_MAILBOX = int(os.getenv("EMAILS_PER_DAY_PER_MAILBOX", "25"))
-MIN_DELAY_BETWEEN_EMAILS = int(os.getenv("MIN_DELAY_BETWEEN_EMAILS", "20"))  # minutes (was 7)
-MAX_DELAY_BETWEEN_EMAILS = int(os.getenv("MAX_DELAY_BETWEEN_EMAILS", "35"))  # minutes (was 12)
+# Sending limits (Expert advice: 30-50 per mailbox per day with proper warmup)
+EMAILS_PER_DAY_PER_MAILBOX = int(os.getenv("EMAILS_PER_DAY_PER_MAILBOX", "50"))
+MIN_DELAY_BETWEEN_EMAILS = int(os.getenv("MIN_DELAY_BETWEEN_EMAILS", "8"))   # minutes — 8-14 min avg = ~42 sends/account/8h
+MAX_DELAY_BETWEEN_EMAILS = int(os.getenv("MAX_DELAY_BETWEEN_EMAILS", "14"))  # minutes — safe for warmed accounts
 
 # Global daily target (0 = disabled, uses per-mailbox limit only)
 # When set, distributes target evenly across active accounts.
@@ -105,15 +110,15 @@ MAX_DELAY_BETWEEN_EMAILS = int(os.getenv("MAX_DELAY_BETWEEN_EMAILS", "35"))  # m
 GLOBAL_DAILY_TARGET = int(os.getenv("GLOBAL_DAILY_TARGET", "0"))
 
 # Warm-up Schedule (CRITICAL to avoid blocks)
-# Week 1: 3 emails/day/account
-# Week 2: 7 emails/day/account  
-# Week 3: 12 emails/day/account
-# Week 4+: 20 emails/day/account (max)
+# Week 1: 5 emails/day/account
+# Week 2: 12 emails/day/account  
+# Week 3: 25 emails/day/account
+# Week 4+: 45 emails/day/account (supports 300/day ÷ 8 accounts = 38 + buffer)
 WARMUP_ENABLED = os.getenv("WARMUP_ENABLED", "true").lower() == "true"
-WARMUP_WEEK1_LIMIT = int(os.getenv("WARMUP_WEEK1_LIMIT", "3"))
-WARMUP_WEEK2_LIMIT = int(os.getenv("WARMUP_WEEK2_LIMIT", "7"))
-WARMUP_WEEK3_LIMIT = int(os.getenv("WARMUP_WEEK3_LIMIT", "12"))
-WARMUP_WEEK4_LIMIT = int(os.getenv("WARMUP_WEEK4_LIMIT", "20"))
+WARMUP_WEEK1_LIMIT = int(os.getenv("WARMUP_WEEK1_LIMIT", "5"))
+WARMUP_WEEK2_LIMIT = int(os.getenv("WARMUP_WEEK2_LIMIT", "12"))
+WARMUP_WEEK3_LIMIT = int(os.getenv("WARMUP_WEEK3_LIMIT", "25"))
+WARMUP_WEEK4_LIMIT = int(os.getenv("WARMUP_WEEK4_LIMIT", "45"))
 
 # Sending hours (US Eastern business hours: 9 AM - 5 PM)
 # Uses America/New_York timezone which auto-handles EST/EDT

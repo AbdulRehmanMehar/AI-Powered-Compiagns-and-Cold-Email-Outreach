@@ -26,10 +26,14 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
       - SCHEDULER_MODE=async
-      - GLOBAL_DAILY_TARGET=${GLOBAL_DAILY_TARGET:-0}
-      - EMAILS_PER_DAY_PER_MAILBOX=${EMAILS_PER_DAY_PER_MAILBOX:-25}
-      - MIN_DELAY_BETWEEN_EMAILS=${MIN_DELAY_BETWEEN_EMAILS:-20}
-      - MAX_DELAY_BETWEEN_EMAILS=${MAX_DELAY_BETWEEN_EMAILS:-35}
+      - GLOBAL_DAILY_TARGET=${GLOBAL_DAILY_TARGET:-300}
+      - EMAILS_PER_DAY_PER_MAILBOX=${EMAILS_PER_DAY_PER_MAILBOX:-50}
+      - MIN_DELAY_BETWEEN_EMAILS=${MIN_DELAY_BETWEEN_EMAILS:-8}
+      - MAX_DELAY_BETWEEN_EMAILS=${MAX_DELAY_BETWEEN_EMAILS:-14}
+      - WARMUP_WEEK1_LIMIT=${WARMUP_WEEK1_LIMIT:-5}
+      - WARMUP_WEEK2_LIMIT=${WARMUP_WEEK2_LIMIT:-12}
+      - WARMUP_WEEK3_LIMIT=${WARMUP_WEEK3_LIMIT:-25}
+      - WARMUP_WEEK4_LIMIT=${WARMUP_WEEK4_LIMIT:-45}
     healthcheck:
       test: ["CMD", "python", "-c", "from database import campaigns_collection; print('healthy') if campaigns_collection.database.client.server_info() else exit(1)"]
       interval: 30s
