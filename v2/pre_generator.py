@@ -161,7 +161,9 @@ class EmailDraft:
                     "claimed_at": datetime.utcnow(),
                 }
             },
-            sort=[("scheduled_send_at", 1), ("created_at", 1)],
+            # Priority: followup_number (desc) → scheduled time → creation time
+            # Ensures followup #2 (Day 6) → followup #1 (Day 3) → initial emails
+            sort=[("followup_number", -1), ("scheduled_send_at", 1), ("created_at", 1)],
             return_document=True,
         )
         if doc:
@@ -303,6 +305,14 @@ class PreGenerator:
             extra={"campaign_id": campaign_id, "lead_count": len(leads), "max_rewrites": max_rewrites},
         )
 
+        # Fetch campaign_context for email generation
+        campaign = Campaign.get_by_id(campaign_id)
+        if campaign:
+            campaign_context = campaign.get("target_criteria", {}).get("campaign_context", {})
+        else:
+            campaign_context = {}
+            logger.warning(f"Campaign {campaign_id} not found — using empty campaign_context")
+
         for lead in leads:
             lead_id = str(lead["_id"])
             to_email = lead.get("email", "")
@@ -376,7 +386,10 @@ class PreGenerator:
                 )
 
                 # Generate email
-                email_data = self._generator.generate_cold_email(lead)
+                email_data = self._generator.generate_initial_email(
+                    lead=lead,
+                    campaign_context=campaign_context
+                )
                 if not email_data:
                     EmailDraft.mark_failed(draft_id, "Generation returned None")
                     stats["failed"] += 1
@@ -387,7 +400,7 @@ class PreGenerator:
 
                 # Review + rewrite loop
                 final_subject, final_body, score = self._review_and_rewrite(
-                    subject, body, lead, max_rewrites
+                    subject, body, lead, campaign_context, max_rewrites
                 )
 
                 if score >= 70:
@@ -409,6 +422,11 @@ class PreGenerator:
 
             except Exception as e:
                 logger.error(f"Draft generation failed for {to_email}: {e}")
+                # Mark the placeholder draft as failed so the lead can be retried
+                try:
+                    EmailDraft.mark_failed(draft_id, str(e)[:500])
+                except Exception:
+                    pass
                 stats["failed"] += 1
 
         logger.info("initial_draft_generation_complete", extra=stats)
@@ -424,6 +442,14 @@ class PreGenerator:
         self._ensure_initialized()
         stats = {"generated": 0, "failed": 0, "skipped": 0}
         logger.info("followup_draft_generation_start", extra={"campaign_id": campaign_id})
+
+        # Fetch campaign_context for email generation
+        campaign = Campaign.get_by_id(campaign_id)
+        if campaign:
+            campaign_context = campaign.get("target_criteria", {}).get("campaign_context", {})
+        else:
+            campaign_context = {}
+            logger.warning(f"Campaign {campaign_id} not found — using empty campaign_context for followups")
 
         # Get leads needing follow-up (same logic as campaign_manager)
         for delay_days in [config.FOLLOWUP_1_DELAY_DAYS, config.FOLLOWUP_2_DELAY_DAYS]:
@@ -487,9 +513,9 @@ class PreGenerator:
                     # Generate follow-up content
                     email_data = self._generator.generate_followup_email(
                         lead=lead,
+                        campaign_context=campaign_context,
                         previous_emails=prev_sent,
                         followup_number=followup_number,
-                        new_thread=(email_type == "followup_new_thread"),
                     )
 
                     if not email_data:
@@ -501,7 +527,7 @@ class PreGenerator:
                     body = email_data.get("body", "")
 
                     final_subject, final_body, score = self._review_and_rewrite(
-                        subject, body, lead, max_rewrites=2
+                        subject, body, lead, campaign_context, max_rewrites=2
                     )
 
                     if score >= 70:
@@ -515,13 +541,19 @@ class PreGenerator:
 
                 except Exception as e:
                     logger.error(f"Followup draft failed for {to_email}: {e}")
+                    # Mark the placeholder draft as failed so the lead can be retried
+                    try:
+                        EmailDraft.mark_failed(draft_id, str(e)[:500])
+                    except Exception:
+                        pass
                     stats["failed"] += 1
 
         logger.info("followup_draft_generation_complete", extra=stats)
         return stats
 
     def _review_and_rewrite(
-        self, subject: str, body: str, lead: Dict, max_rewrites: int
+        self, subject: str, body: str, lead: Dict,
+        campaign_context: Dict, max_rewrites: int = 3,
     ) -> tuple:
         """
         Review an email and rewrite if needed. Returns (subject, body, score).
@@ -531,14 +563,17 @@ class PreGenerator:
         best_body = body
         best_score = 0
 
+        current_email = {"subject": subject, "body": body}
+
         for attempt in range(max_rewrites + 1):
             try:
+                # review_email takes (email_dict, lead) and returns a ReviewResult object
                 review = self._reviewer.review_email(
-                    subject=best_subject,
-                    body=best_body,
+                    email=current_email,
                     lead=lead,
+                    save_review=True,
                 )
-                score = review.get("overall_score", 0)
+                score = review.score  # ReviewResult.score (int 0-100)
                 logger.debug(
                     "review_attempt",
                     extra={"attempt": attempt + 1, "score": score, "best_score": best_score},
@@ -546,23 +581,24 @@ class PreGenerator:
 
                 if score > best_score:
                     best_score = score
-                    best_subject = best_subject
-                    best_body = best_body
+                    best_subject = current_email.get("subject", best_subject)
+                    best_body = current_email.get("body", best_body)
 
-                if score >= 70:
+                if not review.rewrite_required:
                     return best_subject, best_body, score
 
                 # Try to rewrite if score is low and we have attempts left
                 if attempt < max_rewrites:
-                    rewritten = self._reviewer.rewrite_email(
-                        subject=best_subject,
-                        body=best_body,
+                    rewritten = self._reviewer._rewrite_email(
+                        email=current_email,
                         lead=lead,
                         review=review,
+                        campaign_context=campaign_context,
                     )
-                    if rewritten:
-                        best_subject = rewritten.get("subject", best_subject)
-                        best_body = rewritten.get("body", best_body)
+                    if rewritten and isinstance(rewritten, dict) and rewritten.get("subject") and rewritten.get("body"):
+                        current_email = rewritten
+                    else:
+                        logger.debug("Rewrite returned invalid result, keeping previous")
 
             except Exception as e:
                 logger.warning(f"Review attempt {attempt + 1} failed: {e}")
