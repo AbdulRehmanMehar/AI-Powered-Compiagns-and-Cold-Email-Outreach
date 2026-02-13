@@ -4,7 +4,7 @@ V2 Async Scheduler — Orchestrates all workers in a single AsyncIO event loop.
 Replaces auto_scheduler.py with:
 - APScheduler for cron-like triggers with missed-job handling
 - Concurrent IMAP checking (all 8 accounts in parallel)
-- Pre-generation pipeline running during off-hours
+- Continuous pre-generation pipeline (always running in background)
 - Send worker processing drafts during business hours
 - Campaign creation via asyncio.to_thread (wraps legacy CampaignManager)
 - Graceful shutdown on SIGTERM / SIGINT
@@ -22,10 +22,10 @@ Architecture:
     │  ┌─────┴────────────────────────────┐    │
     │  │  Scheduled Tasks:                │    │
     │  │  • check_replies (every 30 min)  │    │
-    │  │  • campaign (09:30, 14:30 ET)    │    │
-    │  │  • reputation (daily)            │    │
+    │  │  • campaign (configurable)       │    │
+    │  │  • reputation (daily 08:00)      │    │
     │  │  • daily_summary (17:00 ET)      │    │
-    │  │  • pre_generate (17:30 ET)       │    │
+    │  │  • adaptive_campaign (2hr cycle) │    │
     │  └──────────────────────────────────┘    │
     │                                          │
     │  ┌─────────────┐  ┌───────────────────┐  │
@@ -33,6 +33,11 @@ Architecture:
     │  │ (locks +    │  │  (concurrent      │  │
     │  │  reputation)│  │   reply/bounce)   │  │
     │  └─────────────┘  └───────────────────┘  │
+    │                                          │
+    │  ┌──────────────────────────────────────┐│
+    │  │ PreGenerator (continuous background) ││
+    │  │ Keeps draft queue populated 24/7     ││
+    │  └──────────────────────────────────────┘│
     └──────────────────────────────────────────┘
 """
 
@@ -146,6 +151,7 @@ class AsyncScheduler:
         self._tasks = [
             asyncio.create_task(self.send_worker.run(), name="send_worker"),
             asyncio.create_task(self.imap_worker.run_periodic(interval_minutes=30), name="imap_worker"),
+            asyncio.create_task(self.pre_generator.run_continuous(self._shutdown), name="pre_generator"),
             asyncio.create_task(self._scheduler_loop(), name="scheduler_loop"),
             asyncio.create_task(self._heartbeat_loop(), name="heartbeat"),
         ]
@@ -273,15 +279,6 @@ class AsyncScheduler:
                         name="daily_summary",
                     )
 
-                # ── Pre-generation (at 17:30 — after sending window) ─
-                pregen_key = f"pregen_{today_str}"
-                if current_hour == 17 and current_minute == 30 and pregen_key not in last_run_dates:
-                    last_run_dates[pregen_key] = today_str
-                    asyncio.create_task(
-                        self._run_pre_generation(),
-                        name="pre_generation",
-                    )
-
                 # ── Cleanup old run tracking (keep only today) ────────
                 last_run_dates = {
                     k: v for k, v in last_run_dates.items() if v == today_str
@@ -373,78 +370,15 @@ class AsyncScheduler:
                 logger.info(f"Daily target already met: {result.get('message')}")
                 return
             
-            # Leads were fetched — now generate drafts immediately
+            # Leads were fetched — log and let continuous pre-gen handle drafting
             logger.info(
                 f"Adaptive campaign completed: "
                 f"fetched {result.get('fetched_leads', 0)} leads, "
                 f"{result.get('sent_today', 0)}/{config.GLOBAL_DAILY_TARGET} sent today"
             )
             
-            # CRITICAL: Trigger pre-generation NOW so drafts are ready to send
-            logger.info("Triggering pre-generation for newly fetched leads...")
-            await self._run_pre_generation()
-            
         except Exception as e:
             logger.error(f"Adaptive campaign failed: {e}", exc_info=True)
-
-    async def _run_pre_generation(self):
-        """
-        Run pre-generation for both initial emails and followups.
-        
-        CRITICAL: Must generate initial drafts for newly fetched leads,
-        not just followups for existing campaigns.
-        """
-        logger.info("Starting pre-generation run")
-
-        try:
-            # Get active campaigns
-            active = Campaign.get_active_campaigns()
-            if not active:
-                logger.info("No active campaigns for pre-generation")
-                return
-
-            total_stats = {"generated": 0, "failed": 0, "skipped": 0, "initial": 0, "followups": 0}
-
-            for campaign in active:
-                cid = str(campaign["_id"])
-                
-                # ── STEP 1: Generate INITIAL drafts for pending leads ──
-                # Get pending leads for this campaign (no email sent yet)
-                cm = self._get_campaign_manager()
-                pending = await asyncio.to_thread(cm.get_pending_leads, max_leads=200)
-                
-                # Filter to only this campaign's leads
-                campaign_leads = [
-                    l for l in pending 
-                    if str(l.get("campaign_id")) == cid
-                ]
-                
-                if campaign_leads:
-                    logger.info(f"Generating {len(campaign_leads)} initial drafts for campaign {cid}")
-                    initial_stats = await self.pre_generator.generate_initial_drafts(
-                        campaign_id=cid,
-                        leads=campaign_leads,
-                        max_rewrites=2
-                    )
-                    total_stats["initial"] += initial_stats.get("generated", 0)
-                    total_stats["generated"] += initial_stats.get("generated", 0)
-                    total_stats["failed"] += initial_stats.get("failed", 0)
-                    total_stats["skipped"] += initial_stats.get("skipped", 0)
-
-                # ── STEP 2: Generate FOLLOWUP drafts ──
-                followup_stats = await self.pre_generator.generate_followup_drafts(cid)
-                total_stats["followups"] += followup_stats.get("generated", 0)
-                total_stats["generated"] += followup_stats.get("generated", 0)
-                total_stats["failed"] += followup_stats.get("failed", 0)
-                total_stats["skipped"] += followup_stats.get("skipped", 0)
-
-            logger.info(
-                "Pre-generation complete",
-                extra=total_stats,
-            )
-
-        except Exception as e:
-            logger.error(f"Pre-generation failed: {e}", exc_info=True)
 
     async def _heartbeat_loop(self):
         """Write heartbeat to MongoDB every 5 minutes for health monitoring."""

@@ -21,7 +21,7 @@ import signal
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr, make_msgid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional
 
 import aiosmtplib
@@ -107,9 +107,6 @@ class SendWorker:
                 # Clean up stale claims (from previous crashes)
                 EmailDraft.cleanup_stale_claimed(timeout_minutes=30)
 
-                # Monitor draft queue — trigger pre-gen if running low
-                await self._check_and_refill_queue()
-
                 # Try to send one draft
                 sent = await self._process_one_draft()
 
@@ -141,76 +138,6 @@ class SendWorker:
             logger.info(f"Released in-flight draft {self._in_flight_draft_id}")
 
         logger.info("send_worker_stopped")
-
-    async def _check_and_refill_queue(self):
-        """
-        Monitor draft queue and trigger pre-generation if running low.
-        This ensures continuous draft availability during send window.
-        """
-        # Check queue size
-        ready_count = EmailDraft.get_stats().get("ready_to_send", 0)
-        
-        # Threshold: if < 50 ready drafts, trigger pre-gen
-        # This gives us buffer time to generate more before queue empties
-        if ready_count < 50:
-            # Only trigger if not already running (check last trigger time)
-            if not hasattr(self, '_last_pregen_trigger'):
-                self._last_pregen_trigger = datetime.utcnow() - timedelta(hours=1)
-            
-            time_since_last = (datetime.utcnow() - self._last_pregen_trigger).total_seconds()
-            
-            # Throttle: only trigger once per 15 minutes
-            if time_since_last > 900:
-                logger.warning(
-                    "draft_queue_low_triggering_pregen",
-                    extra={"ready_count": ready_count, "threshold": 50}
-                )
-                
-                # Trigger pre-generation in background (don't block send worker)
-                try:
-                    from v2.pre_generator import PreGenerator
-                    from database import Campaign
-                    
-                    asyncio.create_task(self._run_background_pregen())
-                    self._last_pregen_trigger = datetime.utcnow()
-                    
-                except Exception as e:
-                    logger.error(f"Failed to trigger background pre-gen: {e}")
-
-    async def _run_background_pregen(self):
-        """Run pre-generation in background without blocking send worker."""
-        try:
-            from v2.pre_generator import PreGenerator
-            from database import Campaign
-            from campaign_manager import CampaignManager
-            
-            pregen = PreGenerator()
-            active = Campaign.get_active_campaigns()
-            
-            if not active:
-                logger.info("No active campaigns for background pre-gen")
-                return
-            
-            # Generate for all active campaigns
-            for campaign in active[:5]:  # Limit to 5 campaigns per trigger
-                cid = str(campaign["_id"])
-                
-                # Get pending leads for this campaign
-                cm = CampaignManager()
-                pending = await asyncio.to_thread(cm.get_pending_leads, max_leads=100)
-                campaign_leads = [l for l in pending if str(l.get("campaign_id")) == cid]
-                
-                if campaign_leads:
-                    logger.info(f"Background pre-gen: {len(campaign_leads)} leads for campaign {cid}")
-                    await pregen.generate_initial_drafts(cid, campaign_leads, max_rewrites=2)
-                
-                # Also generate followups
-                await pregen.generate_followup_drafts(cid)
-            
-            logger.info("Background pre-generation completed")
-            
-        except Exception as e:
-            logger.error(f"Background pre-gen failed: {e}", exc_info=True)
 
     async def _process_one_draft(self) -> bool:
         """

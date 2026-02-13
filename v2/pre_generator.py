@@ -6,8 +6,9 @@ existing EmailGenerator and EmailReviewer classes, then stores them in
 the `email_drafts` MongoDB collection. The send_worker picks up
 ready-to-send drafts and delivers them via SMTP.
 
-Can run during off-hours (5 PM → 9 AM) so the sending window (9-5) is
-100% SMTP-fast with no LLM bottleneck.
+Runs continuously in the background via `run_continuous()` — no schedule,
+no triggers. Just keeps the draft queue populated while the send_worker
+handles pacing independently.
 """
 
 import asyncio
@@ -265,6 +266,7 @@ class PreGenerator:
         self._generator = None
         self._reviewer = None
         self._enricher_func = None
+        self._cm = None  # CampaignManager (lazy-init)
 
     def _ensure_initialized(self):
         """Lazy-init the heavy generator/reviewer objects."""
@@ -274,6 +276,119 @@ class PreGenerator:
 
             self._generator = EmailGenerator()
             self._reviewer = EmailReviewer()
+
+    def _get_campaign_manager(self):
+        """Lazy-init CampaignManager (heavy, synchronous wrapper around MongoDB)."""
+        if self._cm is None:
+            from campaign_manager import CampaignManager
+            self._cm = CampaignManager()
+        return self._cm
+
+    @staticmethod
+    async def _sleep_or_shutdown(event: asyncio.Event, seconds: float):
+        """Sleep for `seconds`, or return early if shutdown is signaled."""
+        try:
+            await asyncio.wait_for(event.wait(), timeout=seconds)
+        except asyncio.TimeoutError:
+            pass
+
+    async def run_continuous(self, shutdown_event: asyncio.Event):
+        """
+        Run pre-generation continuously as a background task.
+
+        Loop: get pending leads → generate drafts → sleep → repeat.
+
+        The send_worker handles pacing/scheduling independently — this just
+        keeps the draft queue populated so the send_worker never starves.
+        """
+        logger.info("continuous_pregen_started")
+
+        # Let other workers (IMAP, account pool) initialize first
+        await self._sleep_or_shutdown(shutdown_event, 15)
+
+        while not shutdown_event.is_set():
+            try:
+                cycle_generated = 0
+                cycle_failed = 0
+                cycle_skipped = 0
+
+                # ── Get active campaigns ──────────────────────────────
+                active = Campaign.get_active_campaigns()
+                if not active:
+                    logger.debug("continuous_pregen: no active campaigns, sleeping 120s")
+                    await self._sleep_or_shutdown(shutdown_event, 120)
+                    continue
+
+                # ── Fetch ALL pending leads once, group by campaign ───
+                cm = self._get_campaign_manager()
+                pending = await asyncio.to_thread(cm.get_pending_leads, max_leads=200)
+
+                leads_by_campaign: Dict[str, List[Dict]] = {}
+                for lead in pending:
+                    cid = str(lead.get("campaign_id", ""))
+                    if cid:
+                        leads_by_campaign.setdefault(cid, []).append(lead)
+
+                # ── Process each campaign ─────────────────────────────
+                for campaign in active:
+                    if shutdown_event.is_set():
+                        break
+
+                    cid = str(campaign["_id"])
+
+                    # Step 1: Initial drafts for pending leads
+                    campaign_leads = leads_by_campaign.get(cid, [])
+                    if campaign_leads:
+                        logger.info(
+                            f"continuous_pregen: generating {len(campaign_leads)} "
+                            f"initials for campaign {cid[:8]}..."
+                        )
+                        stats = await self.generate_initial_drafts(
+                            cid, campaign_leads, max_rewrites=2
+                        )
+                        cycle_generated += stats.get("generated", 0)
+                        cycle_failed += stats.get("failed", 0)
+                        cycle_skipped += stats.get("skipped", 0)
+
+                    # Step 2: Followup drafts
+                    f_stats = await self.generate_followup_drafts(cid)
+                    cycle_generated += f_stats.get("generated", 0)
+                    cycle_failed += f_stats.get("failed", 0)
+                    cycle_skipped += f_stats.get("skipped", 0)
+
+                # ── Housekeeping ──────────────────────────────────────
+                EmailDraft.cleanup_stale_claimed(timeout_minutes=30)
+
+                # ── Adaptive sleep ────────────────────────────────────
+                ready = EmailDraft.get_ready_count()
+
+                if cycle_generated > 0:
+                    logger.info(
+                        "continuous_pregen_cycle",
+                        extra={
+                            "generated": cycle_generated,
+                            "failed": cycle_failed,
+                            "skipped": cycle_skipped,
+                            "ready_queue": ready,
+                        },
+                    )
+                    # Generated drafts — check again soon (more leads may arrive)
+                    sleep_secs = 30
+                else:
+                    logger.debug(
+                        f"continuous_pregen: idle cycle, "
+                        f"{ready} ready in queue, sleeping 120s"
+                    )
+                    # Nothing to do — wait 2 min before rechecking
+                    sleep_secs = 120
+
+                await self._sleep_or_shutdown(shutdown_event, sleep_secs)
+
+            except Exception as e:
+                logger.error(f"continuous_pregen_error: {e}", exc_info=True)
+                await self._sleep_or_shutdown(shutdown_event, 60)
+
+        logger.info("continuous_pregen_stopped")
 
     async def generate_initial_drafts(
         self,

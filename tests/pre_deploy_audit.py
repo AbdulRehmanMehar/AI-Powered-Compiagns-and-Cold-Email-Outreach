@@ -77,8 +77,13 @@ check("DraftStatus.GENERATING", DraftStatus.GENERATING == "generating")
 print("\n=== send_worker.py cross-call verification ===")
 from v2.send_worker import SendWorker
 check("SendWorker._process_one_draft", hasattr(SendWorker, "_process_one_draft"))
-check("SendWorker._check_and_refill_queue", hasattr(SendWorker, "_check_and_refill_queue"))
-check("SendWorker._run_background_pregen", hasattr(SendWorker, "_run_background_pregen"))
+# _check_and_refill_queue and _run_background_pregen removed — pre-gen is now continuous
+
+print("\n=== pre_generator continuous mode verification ===")
+from v2.pre_generator import PreGenerator
+check("PreGenerator.run_continuous", hasattr(PreGenerator, "run_continuous"))
+check("PreGenerator._get_campaign_manager", hasattr(PreGenerator, "_get_campaign_manager"))
+check("PreGenerator._sleep_or_shutdown", hasattr(PreGenerator, "_sleep_or_shutdown"))
 
 print("\n=== main_v2.py import check ===")
 try:
