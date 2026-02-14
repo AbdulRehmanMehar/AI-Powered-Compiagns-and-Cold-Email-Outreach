@@ -320,8 +320,10 @@ class PreGenerator:
                     continue
 
                 # ── Fetch ALL pending leads once, group by campaign ───
+                # Request 500 leads; get_pending_leads now skips leads with
+                # active drafts so each cycle surfaces new work.
                 cm = self._get_campaign_manager()
-                pending = await asyncio.to_thread(cm.get_pending_leads, max_leads=200)
+                pending = await asyncio.to_thread(cm.get_pending_leads, max_leads=500)
 
                 leads_by_campaign: Dict[str, List[Dict]] = {}
                 for lead in pending:

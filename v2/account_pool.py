@@ -415,7 +415,7 @@ class AccountPool:
         """
         can_send, reason = self._can_send_now()
         if not can_send:
-            logger.info("outside_sending_hours", extra={"reason": reason})
+            logger.debug("outside_sending_hours", extra={"reason": reason})
             return None
 
         # Recipient domain throttling

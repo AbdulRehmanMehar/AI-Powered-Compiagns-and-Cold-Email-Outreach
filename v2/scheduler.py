@@ -298,8 +298,12 @@ class AsyncScheduler:
 
     async def _run_campaign(self, camp_config: Dict):
         """
-        Run a scheduled campaign via the legacy CampaignManager.
-        Uses asyncio.to_thread() to not block the event loop.
+        Run a scheduled campaign — LEAD FETCHING ONLY.
+
+        The legacy code used to generate AND send emails directly here,
+        bypassing the draft pipeline. Now this only fetches fresh leads
+        via RocketReach / ICP templates. The continuous pre-generator
+        + send_worker handle drafting and sending.
         """
         name = camp_config.get("name", "unknown")
         max_leads = camp_config.get("max_leads", 15)
@@ -310,7 +314,7 @@ class AsyncScheduler:
             return
 
         async with self._campaign_lock:
-            logger.info(f"Starting campaign: {name} (max_leads={max_leads})")
+            logger.info(f"Starting campaign (lead-fetch only): {name} (max_leads={max_leads})")
 
             try:
                 is_hol, hol_name = is_holiday()
@@ -320,27 +324,48 @@ class AsyncScheduler:
 
                 manager = self._get_campaign_manager()
 
-                if camp_config.get("autonomous", False):
-                    result = await asyncio.to_thread(
-                        manager.run_autonomous_campaign,
-                        max_leads=max_leads,
-                        dry_run=False,
-                    )
-                else:
-                    # Non-autonomous: send follow-ups for all active campaigns
-                    active_campaigns = Campaign.get_active_campaigns()
-                    result = []
-                    for ac in active_campaigns:
-                        cid = str(ac["_id"])
-                        r = await asyncio.to_thread(
-                            manager.send_followup_emails, cid
-                        )
-                        result.append(r)
+                # Only fetch leads — do NOT generate or send emails.
+                # The pre-generator picks up new leads automatically.
+                from database import SchedulerConfig
+                selection = await asyncio.to_thread(
+                    SchedulerConfig.select_icp_for_autonomous_run
+                )
+                selected_icp = selection["selected_icp"]
 
                 logger.info(
-                    f"Campaign {name} completed",
-                    extra={"result": str(result)[:200] if result else "None"},
+                    f"Campaign {name}: fetching leads for ICP '{selected_icp}' "
+                    f"(reason: {selection.get('selection_reason', 'N/A')})"
                 )
+
+                # Create campaign + fetch leads from RocketReach
+                campaign_id = await asyncio.to_thread(
+                    manager.create_campaign_from_icp, selected_icp
+                )
+                leads = await asyncio.to_thread(
+                    manager.fetch_leads_for_campaign, campaign_id, max_leads
+                )
+
+                logger.info(
+                    f"Campaign {name} completed — fetched {len(leads) if leads else 0} leads "
+                    f"(ICP: {selected_icp}, campaign_id: {campaign_id}). "
+                    f"Pre-generator will draft emails automatically."
+                )
+
+                # Record the run
+                if leads:
+                    await asyncio.to_thread(
+                        SchedulerConfig.record_icp_run,
+                        icp_template=selected_icp,
+                        campaign_id=campaign_id,
+                        leads_sent=0,  # We don't send here anymore
+                        results={
+                            "leads_fetched": len(leads),
+                            "sent": 0,
+                            "errors": 0,
+                            "selection_mode": selection.get("selection_mode", "unknown"),
+                            "note": "lead-fetch only, draft pipeline handles sending",
+                        },
+                    )
 
             except Exception as e:
                 logger.error(f"Campaign {name} failed: {e}", exc_info=True)

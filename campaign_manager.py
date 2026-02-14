@@ -5,8 +5,11 @@ import random
 import logging
 from bson import ObjectId
 
-from database import Lead, Email, Campaign, DoNotContact, emails_collection, leads_collection
+from database import Lead, Email, Campaign, DoNotContact, emails_collection, leads_collection, db
 from rocketreach_client import RocketReachClient
+
+# Draft collection — used to skip leads that already have active drafts
+_email_drafts_collection = db["email_drafts"]
 from email_generator import EmailGenerator
 from email_reviewer import EmailReviewer, ReviewStatus, format_review_report
 from email_verifier import EmailVerifier, VerificationStatus
@@ -113,7 +116,7 @@ class CampaignManager:
         print(f"🎯 Campaign created from ICP template: {icp_template}")
         return campaign_id
     
-    def get_pending_leads(self, max_leads: int = 50) -> List[Dict[str, Any]]:
+    def get_pending_leads(self, max_leads: int = 50, skip_drafted: bool = True) -> List[Dict[str, Any]]:
         """
         Get leads that have been fetched but never sent an email.
         
@@ -122,8 +125,13 @@ class CampaignManager:
         2. Have NO corresponding email record (or only failed/pending records)
         3. Are not in the do-not-contact list
         4. Were created on or after Jan 29, 2026 (after system enhancements)
+        5. Do NOT already have an active draft (generating/ready/claimed/sent)
         
         Uses FIFO ordering (oldest first) so no leads are forgotten.
+        
+        Args:
+            max_leads: Maximum leads to return
+            skip_drafted: If True, exclude leads that already have an active draft
         
         Returns:
             List of leads waiting to be contacted
@@ -136,6 +144,17 @@ class CampaignManager:
             "lead_id", 
             {"status": {"$in": ["sent", "opened", "replied"]}}
         ))
+        
+        # Get lead IDs that already have active drafts (not failed/skipped)
+        # This prevents the pre-gen loop from returning the same leads every cycle
+        drafted_lead_ids = set()
+        if skip_drafted:
+            drafted_lead_ids = set(
+                str(oid) for oid in _email_drafts_collection.distinct(
+                    "lead_id",
+                    {"status": {"$nin": ["failed", "skipped"]}}
+                )
+            )
         
         # Find leads without sent emails - OLDEST FIRST (FIFO)
         # Only include leads created after cutoff date
@@ -153,13 +172,19 @@ class CampaignManager:
             "private company", "stealth mode startup",
         }
         
-        for lead in leads_collection.find(query).sort("created_at", 1).limit(max_leads * 3):
+        # Fetch more than max_leads to account for skips (drafted, DNC, invalid, etc.)
+        fetch_limit = max(max_leads * 5, 2000)
+        
+        for lead in leads_collection.find(query).sort("created_at", 1).limit(fetch_limit):
             lead_id = str(lead["_id"])
             email = lead.get("email", "")
             company = (lead.get("company") or lead.get("company_name") or "").strip()
             
             # Skip if already contacted
             if lead_id in sent_lead_ids:
+                continue
+            # Skip if already has an active draft
+            if lead_id in drafted_lead_ids:
                 continue
             # Skip if no email
             if not email:

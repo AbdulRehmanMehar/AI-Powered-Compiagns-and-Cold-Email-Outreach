@@ -111,6 +111,13 @@ class SendWorker:
                 sent = await self._process_one_draft()
 
                 if not sent:
+                    # Check if we're outside sending hours — sleep longer
+                    can_send, _ = self.pool._can_send_now()
+                    if not can_send:
+                        # Outside business hours — check every 5 min
+                        await asyncio.sleep(300)
+                        continue
+
                     # Nothing to send or no accounts available — wait
                     wait_secs = self.pool.get_wait_time()
                     if wait_secs < 0:
@@ -145,6 +152,13 @@ class SendWorker:
         Returns True if a draft was successfully processed (sent or failed).
         Returns False if nothing to do.
         """
+        # Check business hours BEFORE claiming a draft
+        # Prevents the claim→release churn that happened 1,932 times overnight
+        can_send, reason = self.pool._can_send_now()
+        if not can_send:
+            logger.debug("outside_sending_hours", extra={"reason": reason})
+            return False
+
         # Claim a draft atomically
         draft = EmailDraft.claim_next_ready()
         if not draft:
