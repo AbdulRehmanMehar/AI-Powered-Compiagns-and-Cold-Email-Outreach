@@ -93,7 +93,7 @@ def is_holiday(target_date: date = None) -> Tuple[bool, Optional[str]]:
 
     holidays = get_us_holidays(target_date.year)
     if target_date in holidays:
-        logger.info("holiday_detected", extra={"date": str(target_date), "name": holidays[target_date]})
+        logger.info("holiday_detected", extra={"date": str(target_date), "holiday_name": holidays[target_date]})
         return True, holidays[target_date]
     return False, None
 
