@@ -5,3 +5,7 @@ stack.env
 !.env.example
 _coldemails*
 *.log
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

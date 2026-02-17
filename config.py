@@ -68,7 +68,7 @@ EMAILS_PER_ACCOUNT = int(os.getenv("EMAILS_PER_ACCOUNT", "5"))
 # Domain throttling — max emails to a single recipient domain per day
 # Prevents sending too many emails to the same company/ESP in one day
 # With 300/day target, 3 is too tight for diverse domains — 5 is a safer default
-MAX_EMAILS_PER_RECIPIENT_DOMAIN = int(os.getenv("MAX_EMAILS_PER_RECIPIENT_DOMAIN", "5"))
+MAX_EMAILS_PER_RECIPIENT_DOMAIN = int(os.getenv("MAX_EMAILS_PER_RECIPIENT_DOMAIN", "25"))
 
 # Legacy single account support (for backward compatibility)
 ZOHO_EMAIL = ZOHO_ACCOUNTS[0]["email"] if ZOHO_ACCOUNTS else ""

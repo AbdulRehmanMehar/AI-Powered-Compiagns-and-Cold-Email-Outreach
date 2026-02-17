@@ -665,7 +665,10 @@ class SendingStats:
     @staticmethod
     def get_sends_today(account_email: str) -> int:
         """Get number of emails sent today from this account"""
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        import pytz
+        import config
+        tz = pytz.timezone(config.TARGET_TIMEZONE)
+        today = datetime.now(tz).strftime("%Y-%m-%d")
         record = SendingStats._collection.find_one({
             "account_email": account_email,
             "date": today
@@ -675,7 +678,10 @@ class SendingStats:
     @staticmethod
     def increment_send(account_email: str):
         """Increment send count for today"""
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        import pytz
+        import config
+        tz = pytz.timezone(config.TARGET_TIMEZONE)
+        today = datetime.now(tz).strftime("%Y-%m-%d")
         SendingStats._collection.update_one(
             {"account_email": account_email, "date": today},
             {

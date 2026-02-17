@@ -20,7 +20,7 @@ Key guidelines enforced:
 8. NO banned phrases that scream "cold email"
 """
 
-from email_generator import humanize_email, get_llm_client, get_rate_limiter, GROQ_FALLBACK_CHAIN, GROQ_MODEL_LIMITS  # Import humanize function, LLM client, and rotation
+from email_generator import get_llm_client, get_rate_limiter, GROQ_FALLBACK_CHAIN, GROQ_MODEL_LIMITS  # Import LLM client and rotation
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -1263,13 +1263,9 @@ Fix ALL the issues. Follow LeadGenJay's guidelines EXACTLY:
             
             result = json.loads(response_content)
             
-            # Post-process to remove any AI tells the LLM sneaks in
-            # Use 'or' to handle both None and empty string from result.get()
+            # Trust AI completely - no postprocessing
             subject = result.get("subject") or email.get("subject", "")
             body = result.get("body") or email.get("body", "")
-            
-            subject = humanize_email(subject) if subject else email.get("subject", "")
-            body = humanize_email(body) if body else email.get("body", "")
             
             return {
                 "subject": subject,

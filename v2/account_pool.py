@@ -47,19 +47,23 @@ class AccountReputation:
           0 = Terrible (many bounces, spam complaints)
     """
 
-    PAUSE_THRESHOLD = 40
-    WARNING_THRESHOLD = 60
+    PAUSE_THRESHOLD = 20
+    WARNING_THRESHOLD = 40
 
     @staticmethod
-    def compute_score(account_email: str, window_days: int = 7) -> dict:
+    def compute_score(account_email: str, window_days: int = 3) -> dict:
         """
         Compute reputation score for an account based on recent activity.
+        Reduced from 7 to 3 days to focus on recent performance.
 
         Returns dict with score and breakdown.
         """
         from database import emails_collection
-
-        cutoff = datetime.utcnow() - timedelta(days=window_days)
+        import pytz
+        import config
+        
+        tz = pytz.timezone(config.TARGET_TIMEZONE)
+        cutoff = datetime.now(tz).replace(tzinfo=None) - timedelta(days=window_days)
 
         pipeline = [
             {
@@ -125,12 +129,13 @@ class AccountReputation:
         # Start at 100, subtract for bad metrics, add for good ones
         score = 100.0
 
-        # Bounces are the most damaging (-40 per 1% bounce rate over 3%)
-        if bounce_rate > 0.03:
-            score -= (bounce_rate - 0.03) * 4000  # 5% bounce = -80
+        # Bounces are most damaging (but more reasonable for cold email)
+        if bounce_rate > 0.05:
+            score -= (bounce_rate - 0.05) * 1000  # 7% bounce = -20
 
-        # Failures (SMTP errors) are moderately bad
-        score -= fail_rate * 500  # 5% fail rate = -25
+        # Failures (SMTP errors) - lighter penalty  
+        if fail_rate > 0.05:
+            score -= (fail_rate - 0.05) * 300  # 8% fail = -9
 
         # Good reply rate is a positive signal (+10 per 1% reply rate)
         score += reply_rate * 1000  # 5% reply rate = +50
@@ -145,9 +150,9 @@ class AccountReputation:
         score = max(0, min(100, score))
 
         reason_parts = []
-        if bounce_rate > 0.03:
+        if bounce_rate > 0.05:
             reason_parts.append(f"bounce {bounce_rate:.1%}")
-        if fail_rate > 0.02:
+        if fail_rate > 0.05:
             reason_parts.append(f"fail {fail_rate:.1%}")
         if reply_rate > 0.02:
             reason_parts.append(f"reply {reply_rate:.1%} (good)")

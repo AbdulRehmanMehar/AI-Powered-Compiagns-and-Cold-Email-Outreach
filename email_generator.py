@@ -1709,10 +1709,14 @@ Don't change the company type or industry. Keep it factual.
 Line 4 = SOFT CTA + SIGN-OFF (2 lines):
 One casual question as CTA. Then "abdul" on the next line.
 
-RULES:
+FORMATTING RULES - THIS IS CRITICAL:
+- Each section MUST have a blank line before it
+- The email must have exactly 3 blank lines total (between the 4 sections)
+- Format: Line1\\n\\nLine2\\n\\nLine3\\n\\nCTA\\nabdul
+
+CONTENT RULES:
 - Subject: 2-3 lowercase words, no dashes, no punctuation
 - Body: 45-70 words total. If under 45, add more detail to Line 2.
-- CRITICAL: Separate each section with a BLANK LINE (empty line between sections)
 - Line 1 must NOT mention "{company}" or any company. Pure curiosity only.
 - Line 2 MUST mention "{company}" by name, spelled exactly.
 - NO em dashes. Use commas or periods.
@@ -2010,22 +2014,7 @@ Return JSON: {{"subject": "{suggested_subject}", "body": "line1\\n\\nline2\\n\\n
                 print(f"   ⚠️ Email starts with stalker pattern, using fallback...")
                 return self._fallback_email(lead, campaign_context, research, case_study, suggested_cta)
             
-            # STRIP em dashes before validation (replace with comma instead of rejecting)
-            if '—' in body:
-                body = body.replace('—', ',')
-                print(f"   🔧 Replaced em dashes with commas")
-            if '—' in subject:
-                subject = subject.replace('—', ',')
-            
-            # Final validation for other issues
-            body = self._validate_and_clean(body, lead, case_study)
-            
-            # HUMANIZE - Strip any remaining AI tells
-            subject = humanize_email(subject)
-            body = humanize_email(body)
-            
-            # ── Shared post-processing: paragraph breaks, signature, CTA, self-addressing ──
-            body = self._postprocess_body(body, first_name)
+            # Trust AI completely - no postprocessing or validation
             
             return {
                 "subject": subject,
@@ -2036,195 +2025,6 @@ Return JSON: {{"subject": "{suggested_subject}", "body": "line1\\n\\nline2\\n\\n
         except Exception as e:
             print(f"Error generating email: {e}")
             return self._fallback_email(lead, campaign_context, research, case_study, suggested_cta)
-    
-    def _validate_and_clean(self, body: str, lead: Dict, case_study: Dict) -> str:
-        """Validate email doesn't contain banned patterns - STRICT per LeadGenJay"""
-        # Safety check for None
-        if body is None:
-            return ""
-        
-        # CRITICAL: Check for em dash - the #1 AI writing tell
-        if '—' in body:
-            print(f"   ❌ EMAIL REJECTED: Contains em dash (—) - AI tell!")
-            raise ValueError("Email contains em dash (—) - banned per LeadGenJay rules")
-        
-        banned_phrases = [
-            "i hope this finds you well",
-            "i'm reaching out",
-            "i noticed your company",
-            "i noticed that",
-            "i noticed ",  # Catch all "I noticed" variants
-            "i saw that",
-            "i came across",
-            "just wanted to reach out",
-            "touching base",
-            "circling back",
-            "leverage",
-            "synergy",
-            "streamline",
-            "optimize",
-            "innovative",
-            "cutting-edge",
-            "game-changing",
-            "how are you navigating",  # Too formal
-            "how are you ensuring",    # Too formal
-            "how are you managing",    # Too formal
-            "how are you handling",    # Too formal
-            "how's that affecting",    # Too formal
-            # NEW: Lazy generic phrases from LeadGenJay
-            "sound familiar?",         # Overused AI pattern
-            "you're probably",         # Generic assumption
-            "most teams struggle",     # Templated garbage
-            "you're likely",           # Another assumption
-            # NEW: Lazy generic phrases
-            "scaling is hard",
-            "scaling is tough",
-            "growth is hard",
-            "growth is tough",
-            "must be tough",
-            "must hurt",
-            "must be a pain",
-            "must be a headache",
-            "must be challenging",
-            "funding is a challenge",
-        ]
-        
-        # NEW: Lazy templated patterns to check
-        lazy_patterns = [
-            r"^(random|odd|quick)\s+(thought|q)\.\s+\w+\s+scaling\s+fast",
-            r"^(random|odd|quick)\s+(thought|q)\.\s+\w+('s)?\s+growth\s+(is\s+)?(fast|tough|hard)",
-            r"\bscaling fast\.\s*(scaling|growth)\s+is\s+(hard|tough)",
-        ]
-        
-        # Check for double CTAs (desperate look)
-        cta_phrases = ["worth a chat", "worth a quick chat", "interested", "make sense", "open to", "curious if"]
-        
-        body_lower = body.lower()
-        first_line = body.split('\n')[0].lower() if body else ""
-        issues = []
-        
-        for phrase in banned_phrases:
-            if phrase in body_lower:
-                issues.append(f"Contains banned phrase: '{phrase}'")
-        
-        # NEW: Check for lazy templated patterns
-        for pattern in lazy_patterns:
-            if re.search(pattern, first_line):
-                issues.append(f"Lazy templated opener detected: '{first_line[:50]}...'")
-                break
-        
-        # NEW: Check minimum word count
-        word_count = len(body.split())
-        if word_count < 25:
-            issues.append(f"Email too short ({word_count} words) - feels robotic")
-        
-        # Count CTAs
-        cta_count = sum(1 for cta in cta_phrases if cta in body_lower)
-        if cta_count > 1:
-            issues.append(f"Multiple CTAs detected ({cta_count}) - looks desperate")
-        
-        # Check first line for robotic patterns
-        if first_line.startswith("i noticed") or first_line.startswith("i saw"):
-            issues.append("Opens with robotic 'I noticed/saw' pattern")
-        
-        # Check sentence lengths
-        sentences = [s.strip() for s in body.replace('\n', '. ').split('.') if s.strip()]
-        for s in sentences:
-            s_word_count = len(s.split())
-            if s_word_count > 15:
-                issues.append(f"Long sentence ({s_word_count} words): '{s[:40]}...'")
-        
-        # Log warnings
-        for issue in issues:
-            print(f"⚠️  VALIDATION WARNING: {issue}")
-        
-        return body
-    
-    def _postprocess_body(self, body: str, first_name: str, is_followup: bool = False) -> str:
-        """
-        Shared post-processing for ALL email types (initial + followups).
-        Enforces paragraph breaks, signature, CTA question mark, and fixes self-addressing.
-        """
-        if not body:
-            return body
-        
-        sender_names = ["abdul", "abdulrehman", "ali", "usama", "bilal"]
-        
-        # ── FIX: Prevent self-addressing ──
-        first_line = body.split('\n')[0].lower().strip()
-        for sname in sender_names:
-            if sname != first_name.lower() and f"hey {sname}" in first_line:
-                body = body.replace(f"hey {sname}", f"hey {first_name.lower()}", 1)
-                body = body.replace(f"Hey {sname}", f"hey {first_name.lower()}", 1)
-                body = body.replace(f"Hey {sname.title()}", f"hey {first_name.lower()}", 1)
-                break
-        
-        # ── FIX: Enforce paragraph breaks ──
-        non_empty = [l for l in body.split('\n') if l.strip()]
-        blank_count = body.count('\n\n')
-        if blank_count < 2 and len(non_empty) >= 3:
-            rebuilt = []
-            for j, line in enumerate(non_empty):
-                ll = line.strip().lower()
-                if j > 0:
-                    if 'we helped' in ll or 'helped a' in ll or 'helped an' in ll:
-                        if not rebuilt or rebuilt[-1] != '':
-                            rebuilt.append('')
-                    elif any(cta in ll for cta in [
-                        'worth', 'thoughts?', 'ring any', 'crazy or', 'am i off',
-                        'make any sense', 'does this resonate', 'sound familiar',
-                        'is this even', 'worth a look', 'abdul'
-                    ]):
-                        if not rebuilt or rebuilt[-1] != '':
-                            rebuilt.append('')
-                    elif j == len(non_empty) - 1 and len(line.split()) <= 6:
-                        if not rebuilt or rebuilt[-1] != '':
-                            rebuilt.append('')
-                rebuilt.append(line)
-            body = '\n'.join(rebuilt)
-        
-        # If body is ALL on one line, force split
-        if '\n' not in body and len(body.split()) > 15:
-            sentences = re.split(r'(?<=[.?!])\s+', body)
-            if len(sentences) >= 3:
-                cs_idx = next((i for i, s in enumerate(sentences)
-                               if 'we helped' in s.lower() or 'helped a' in s.lower()), None)
-                if cs_idx and cs_idx > 0:
-                    part1 = ' '.join(sentences[:cs_idx])
-                    part2 = sentences[cs_idx]
-                    part3 = ' '.join(sentences[cs_idx+1:])
-                    body = f"{part1}\n\n{part2}\n\n{part3}"
-                else:
-                    mid1 = len(sentences) // 3
-                    mid2 = 2 * len(sentences) // 3
-                    if mid1 > 0 and mid2 > mid1:
-                        p1 = ' '.join(sentences[:mid1])
-                        p2 = ' '.join(sentences[mid1:mid2])
-                        p3 = ' '.join(sentences[mid2:])
-                        body = f"{p1}\n\n{p2}\n\n{p3}"
-        
-        # ── FIX: Enforce signature ──
-        body_stripped = body.rstrip()
-        last_line = body_stripped.split('\n')[-1].strip().lower() if body_stripped else ""
-        has_signoff = any(name in last_line for name in sender_names)
-        if not has_signoff:
-            body = body_stripped + "\nabdul"
-        
-        # ── FIX: Ensure CTA ends with question mark ──
-        lines = body.split('\n')
-        for idx in range(len(lines) - 1, -1, -1):
-            stripped = lines[idx].strip()
-            if stripped and stripped.lower() not in sender_names and stripped != '':
-                if not stripped.endswith('?') and len(stripped.split()) <= 8:
-                    lines[idx] = stripped.rstrip('.') + '?'
-                break
-        body = '\n'.join(lines)
-        
-        # ── FIX: Remove em dashes ──
-        body = body.replace('—', ',')
-        body = body.replace('–', ',')
-        
-        return body
     
     def _fallback_email(self, lead: Dict, context: Dict, research: Dict, case_study: Dict, cta: str = None) -> Dict[str, str]:
         """
@@ -2462,7 +2262,11 @@ CONTEXT:
 - The case study company is "{cs_reference}" (A DIFFERENT COMPANY we helped before)
 - NEVER confuse these two. "{company}" is who you're emailing. "{cs_reference}" is the past client.
 
-RULES:
+FORMATTING RULES:
+- If email has multiple sentences/thoughts, separate with blank lines for readability
+- Use paragraph breaks between different ideas (value statement vs CTA)
+
+CONTENT RULES:
 - This is email #2 in the same thread. Subject stays "Re: [original]".
 - UNDER 40 words. Shorter than the first email.
 - PURPOSE: explain in more depth HOW we made the case study result possible. Don't just name-drop the result, explain the approach or what we did.
@@ -2499,8 +2303,7 @@ Return JSON: {{"body": "..."}}"""
             if not body.strip() or len(body.split()) < 8:
                 raise ValueError("Body too short or empty")
             
-            # Post-processing (same quality checks as initial emails)
-            body = humanize_email(body)
+            # Trust AI completely - no postprocessing
             
             # Fix company misspelling
             if company and company.lower() not in body.lower():
@@ -2513,9 +2316,6 @@ Return JSON: {{"body": "..."}}"""
                         body = body.replace(clean, company)
                         break
             
-            # Shared post-processing: paragraph breaks, signature, CTA, self-addressing
-            body = self._postprocess_body(body, first_name, is_followup=True)
-            
             return {
                 "subject": f"Re: {original_subject}",
                 "body": body
@@ -2526,7 +2326,6 @@ Return JSON: {{"body": "..."}}"""
             body = f"""{selected_opener} - we helped {cs_reference} {cs_result_sentence}. documented the whole process, might be relevant for {company}.
 
 {selected_cta}"""
-            body = humanize_email(body)
             return {
                 "subject": f"Re: {original_subject}",
                 "body": body
@@ -2656,7 +2455,11 @@ CONTEXT:
 - The angle: offer a FREE resource/lead magnet (not a meeting). Lower the friction.
 - LeadGenJay says: "they've already ignored you. your CTA was too much of an ask. offer more value and give them something in return."
 
-RULES:
+FORMATTING RULES:
+- If email has multiple sentences/thoughts, separate with blank lines for readability
+- Use paragraph breaks between the value statement and the CTA
+
+CONTENT RULES:
 - Start naturally, like texting a colleague. Use "hey {first_name.lower()}," or just jump in.
 - Do NOT use the "name -" or "name —" format. No dashes after the name.
 - UNDER 40 words total
@@ -2701,8 +2504,7 @@ Return JSON: {{"body": "..."}}"""
                 body = body[len(body_lower_first):].lstrip(' -–').strip()
                 body = f"hey {body_lower_first}, {body}"
             
-            # Post-processing
-            body = humanize_email(body)
+            # Trust AI completely - no postprocessing
             
             # Fix company misspelling
             if company and company.lower() not in body.lower():
@@ -2715,9 +2517,6 @@ Return JSON: {{"body": "..."}}"""
                         body = body.replace(clean, company)
                         break
             
-            # Shared post-processing: paragraph breaks, signature, CTA, self-addressing
-            body = self._postprocess_body(body, first_name, is_followup=True)
-            
             return {
                 "subject": new_subject,
                 "body": body,
@@ -2729,7 +2528,6 @@ Return JSON: {{"body": "..."}}"""
             body = f"""hey {first_name.lower()}, {pain_angle}. based on real numbers from companies we've worked with.
 
 want me to send it over?"""
-            body = humanize_email(body)
             return {
                 "subject": new_subject,
                 "body": body,
