@@ -13,8 +13,9 @@ handles pacing independently.
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from bson import ObjectId
 
@@ -95,23 +96,14 @@ class EmailDraft:
         result = email_drafts_collection.insert_one(doc)
         draft_id = str(result.inserted_id)
         logger.info(
-            "draft_created",
-            extra={
-                "draft_id": draft_id,
-                "lead_id": lead_id,
-                "campaign_id": campaign_id,
-                "email_type": email_type,
-                "to_email": to_email,
-            },
+            f"draft_created: {draft_id[:8]}... lead={lead_id[:8]}... "
+            f"type={email_type} to={to_email}",
         )
         return draft_id
 
     @staticmethod
     def mark_ready(draft_id: str, subject: str, body: str, quality_score: int, html_body: str = None):
-        logger.info(
-            "draft_marked_ready",
-            extra={"draft_id": draft_id, "quality_score": quality_score, "subject": subject[:60]},
-        )
+        logger.info(f"draft_marked_ready: {draft_id[:8]}... score={quality_score} subj={subject[:50]}")
         email_drafts_collection.update_one(
             {"_id": ObjectId(draft_id)},
             {
@@ -128,10 +120,7 @@ class EmailDraft:
 
     @staticmethod
     def mark_review_failed(draft_id: str, quality_score: int, error: str = None):
-        logger.warning(
-            "draft_review_failed",
-            extra={"draft_id": draft_id, "quality_score": quality_score, "error": error},
-        )
+        logger.warning(f"draft_review_failed: {draft_id[:8]}... score={quality_score} error={error}")
         email_drafts_collection.update_one(
             {"_id": ObjectId(draft_id)},
             {
@@ -145,14 +134,27 @@ class EmailDraft:
         )
 
     @staticmethod
-    def claim_next_ready(from_account: str = None) -> Optional[Dict]:
+    def claim_next_ready(from_account: str = None, skip_domains: Set[str] = None) -> Optional[Dict]:
         """
         Atomically claim the next ready-to-send draft.
         Uses findOneAndUpdate to prevent race conditions.
+
+        Args:
+            from_account: Optionally restrict to drafts for a specific sender.
+            skip_domains: Set of recipient domains to exclude (already
+                          saturated by domain throttling).
         """
         query = {"status": DraftStatus.READY}
         if from_account:
             query["from_account"] = from_account
+
+        # Pre-filter drafts whose recipient domain is already saturated today.
+        # This prevents the claim→throttle→release infinite loop.
+        if skip_domains:
+            escaped = [re.escape(d) for d in skip_domains]
+            # Match to_email ending with @<domain> (case-insensitive)
+            pattern = "@(" + "|".join(escaped) + ")$"
+            query["to_email"] = {"$not": {"$regex": pattern, "$options": "i"}}
 
         doc = email_drafts_collection.find_one_and_update(
             query,
@@ -169,8 +171,7 @@ class EmailDraft:
         )
         if doc:
             logger.info(
-                "draft_claimed",
-                extra={"draft_id": str(doc["_id"]), "to_email": doc.get("to_email"), "type": doc.get("email_type")},
+                f"draft_claimed: {str(doc['_id'])[:8]}... to={doc.get('to_email')} type={doc.get('email_type')}",
             )
         else:
             logger.debug("no_ready_drafts")
@@ -178,10 +179,7 @@ class EmailDraft:
 
     @staticmethod
     def mark_sent(draft_id: str, message_id: str = None, from_email: str = None):
-        logger.info(
-            "draft_marked_sent",
-            extra={"draft_id": draft_id, "from_email": from_email, "message_id": (message_id or "")[:40]},
-        )
+        logger.info(f"draft_marked_sent: {draft_id[:8]}... from={from_email}")
         email_drafts_collection.update_one(
             {"_id": ObjectId(draft_id)},
             {
@@ -196,7 +194,7 @@ class EmailDraft:
 
     @staticmethod
     def mark_failed(draft_id: str, error: str):
-        logger.error("draft_marked_failed", extra={"draft_id": draft_id, "error": error[:200]})
+        logger.error(f"draft_marked_failed: {draft_id[:8]}... error={error[:200]}")
         email_drafts_collection.update_one(
             {"_id": ObjectId(draft_id)},
             {
@@ -211,7 +209,7 @@ class EmailDraft:
     @staticmethod
     def release_claimed(draft_id: str):
         """Release a claimed draft back to ready (e.g. on shutdown)."""
-        logger.info("draft_released", extra={"draft_id": draft_id})
+        logger.info(f"draft_released: {draft_id[:8]}...")
         email_drafts_collection.update_one(
             {"_id": ObjectId(draft_id), "status": DraftStatus.CLAIMED},
             {"$set": {"status": DraftStatus.READY}},
@@ -366,13 +364,8 @@ class PreGenerator:
 
                 if cycle_generated > 0:
                     logger.info(
-                        "continuous_pregen_cycle",
-                        extra={
-                            "generated": cycle_generated,
-                            "failed": cycle_failed,
-                            "skipped": cycle_skipped,
-                            "ready_queue": ready,
-                        },
+                        f"continuous_pregen_cycle: generated={cycle_generated} "
+                        f"failed={cycle_failed} skipped={cycle_skipped} ready_queue={ready}",
                     )
                     # Generated drafts — check again soon (more leads may arrive)
                     sleep_secs = 30
@@ -418,8 +411,8 @@ class PreGenerator:
 
         stats = {"generated": 0, "failed": 0, "skipped": 0}
         logger.info(
-            "initial_draft_generation_start",
-            extra={"campaign_id": campaign_id, "lead_count": len(leads), "max_rewrites": max_rewrites},
+            f"initial_draft_generation_start: campaign={campaign_id[:8]}... "
+            f"leads={len(leads)} max_rewrites={max_rewrites}",
         )
 
         # Fetch campaign_context for email generation
@@ -524,12 +517,7 @@ class PreGenerator:
                     EmailDraft.mark_ready(draft_id, final_subject, final_body, score)
                     stats["generated"] += 1
                     logger.info(
-                        "draft_generated",
-                        extra={
-                            "lead_id": lead_id,
-                            "score": score,
-                            "type": "initial",
-                        },
+                        f"draft_generated: lead={lead_id[:8]}... score={score} type=initial",
                     )
                 else:
                     EmailDraft.mark_review_failed(
@@ -546,7 +534,7 @@ class PreGenerator:
                     pass
                 stats["failed"] += 1
 
-        logger.info("initial_draft_generation_complete", extra=stats)
+        logger.info(f"initial_draft_generation_complete: {stats}")
         return stats
 
     async def generate_followup_drafts(self, campaign_id: str) -> Dict:
@@ -558,7 +546,7 @@ class PreGenerator:
     def _generate_followup_drafts_sync(self, campaign_id: str) -> Dict:
         self._ensure_initialized()
         stats = {"generated": 0, "failed": 0, "skipped": 0}
-        logger.info("followup_draft_generation_start", extra={"campaign_id": campaign_id})
+        logger.info(f"followup_draft_generation_start: campaign={campaign_id[:8]}...")
 
         # Fetch campaign_context for email generation
         campaign = Campaign.get_by_id(campaign_id)
@@ -665,7 +653,7 @@ class PreGenerator:
                         pass
                     stats["failed"] += 1
 
-        logger.info("followup_draft_generation_complete", extra=stats)
+        logger.info(f"followup_draft_generation_complete: {stats}")
         return stats
 
     def _review_and_rewrite(

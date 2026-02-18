@@ -36,6 +36,7 @@ from database import (
 from v2.account_pool import AccountPool
 from v2.pre_generator import EmailDraft, DraftStatus, email_drafts_collection
 from v2.human_behavior import (
+    domain_tracker,
     is_holiday,
     should_skip_send,
     get_reply_pause_seconds,
@@ -94,7 +95,7 @@ class SendWorker:
                 # Check if it's a holiday
                 is_hol, hol_name = is_holiday()
                 if is_hol:
-                    logger.info("holiday_skip", extra={"holiday": hol_name})
+                    logger.info(f"holiday_skip: {hol_name}")
                     await asyncio.sleep(3600)  # check again in an hour
                     continue
 
@@ -116,6 +117,19 @@ class SendWorker:
                     if not can_send:
                         # Outside business hours — check every 5 min
                         await asyncio.sleep(300)
+                        continue
+
+                    # Check if all remaining drafts are domain-throttled.
+                    # In that case, retrying every 30s is wasteful — sleep 10 min.
+                    saturated = domain_tracker.get_saturated_domains()
+                    if saturated and EmailDraft.get_ready_count() > 0:
+                        ready_total = EmailDraft.get_ready_count()
+                        logger.info(
+                            f"domain_throttle_backoff: {ready_total} drafts "
+                            f"blocked by {len(saturated)} saturated domains, "
+                            f"sleeping 10 min",
+                        )
+                        await asyncio.sleep(600)  # 10 min
                         continue
 
                     # Nothing to send or no accounts available — wait
@@ -159,9 +173,20 @@ class SendWorker:
             logger.debug("outside_sending_hours", extra={"reason": reason})
             return False
 
-        # Claim a draft atomically
-        draft = EmailDraft.claim_next_ready()
+        # Pre-filter domains that are already at their daily send limit.
+        # Without this, we'd claim→throttle→release the same draft forever.
+        saturated = domain_tracker.get_saturated_domains()
+
+        # Claim a draft atomically (skipping saturated domains)
+        draft = EmailDraft.claim_next_ready(skip_domains=saturated if saturated else None)
         if not draft:
+            # If there ARE ready drafts but all are domain-saturated, log it
+            if saturated and EmailDraft.get_ready_count() > 0:
+                logger.info(
+                    f"all_remaining_drafts_domain_throttled: "
+                    f"{EmailDraft.get_ready_count()} drafts blocked by "
+                    f"{len(saturated)} saturated domains",
+                )
             return False
 
         draft_id = str(draft["_id"])
@@ -169,14 +194,8 @@ class SendWorker:
         to_email = draft.get("to_email", "")
         preferred_account = draft.get("from_account")
         logger.info(
-            "processing_draft",
-            extra={
-                "draft_id": draft_id,
-                "to": to_email,
-                "type": draft.get("email_type"),
-                "followup": draft.get("followup_number", 0),
-                "preferred_account": preferred_account,
-            },
+            f"processing_draft: {draft_id[:8]}... to={to_email} "
+            f"type={draft.get('email_type')} followup={draft.get('followup_number', 0)}",
         )
 
         try:
@@ -238,14 +257,8 @@ class SendWorker:
                     await self.pool.record_send(from_email, to_email)
 
                     logger.info(
-                        "email_sent",
-                        extra={
-                            "to": to_email,
-                            "from": from_email,
-                            "draft_id": draft_id,
-                            "type": draft.get("email_type"),
-                            "score": draft.get("quality_score"),
-                        },
+                        f"email_sent: {from_email} → {to_email} "
+                        f"type={draft.get('email_type')} score={draft.get('quality_score')}",
                     )
                     return True
 
@@ -258,8 +271,7 @@ class SendWorker:
 
                     EmailDraft.mark_failed(draft_id, error)
                     logger.error(
-                        "email_send_failed",
-                        extra={"to": to_email, "from": from_email, "error": error},
+                        f"email_send_failed: {from_email} → {to_email} error={error[:120]}",
                     )
                     return True  # processed (even though failed)
 
@@ -339,10 +351,7 @@ class SendWorker:
             await smtp.sendmail(from_email, [to_email], msg.as_string())
             await smtp.quit()
 
-            logger.info(
-                "smtp_transmitted",
-                extra={"to": to_email, "from": from_email, "message_id": message_id[:40]},
-            )
+            logger.info(f"smtp_transmitted: {from_email} → {to_email} msgid={message_id[:40]}")
 
             return {
                 "success": True,

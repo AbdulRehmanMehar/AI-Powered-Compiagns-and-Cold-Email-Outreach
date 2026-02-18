@@ -93,7 +93,7 @@ def is_holiday(target_date: date = None) -> Tuple[bool, Optional[str]]:
 
     holidays = get_us_holidays(target_date.year)
     if target_date in holidays:
-        logger.info("holiday_detected", extra={"date": str(target_date), "holiday_name": holidays[target_date]})
+        logger.info(f"holiday_detected: {target_date} — {holidays[target_date]}")
         return True, holidays[target_date]
     return False, None
 
@@ -310,8 +310,8 @@ def plan_daily_sessions(
         cursor += session.duration_minutes
 
     logger.info(
-        "sessions_planned",
-        extra={"sessions": [repr(s) for s in sessions], "total_emails": sum(s.email_count for s in sessions)},
+        f"sessions_planned: {len(sessions)} sessions, "
+        f"{sum(s.email_count for s in sessions)} emails: {[repr(s) for s in sessions]}",
     )
     return sessions
 
@@ -363,7 +363,7 @@ def should_skip_send(skip_probability: float = 0.05) -> bool:
     """
     skip = random.random() < skip_probability
     if skip:
-        logger.info("human_break_skip", extra={"probability": skip_probability})
+        logger.info(f"human_break_skip: probability={skip_probability}")
     return skip
 
 
@@ -380,7 +380,7 @@ def get_reply_pause_seconds() -> int:
         Pause duration in seconds (30-90 minutes)
     """
     pause = random.randint(30 * 60, 90 * 60)
-    logger.info("reply_pause", extra={"pause_seconds": pause, "pause_minutes": pause // 60})
+    logger.info(f"reply_pause: {pause // 60} min ({pause}s)")
     return pause
 
 
@@ -403,10 +403,7 @@ def get_bounce_slowdown_multiplier(bounce_rate: float) -> float:
     else:
         multiplier = 1.0
     if multiplier > 1.0:
-        logger.warning(
-            "bounce_slowdown",
-            extra={"bounce_rate": f"{bounce_rate:.2%}", "multiplier": multiplier},
-        )
+        logger.warning(f"bounce_slowdown: rate={bounce_rate:.2%} multiplier={multiplier}x")
     return multiplier
 
 
@@ -419,17 +416,44 @@ class RecipientDomainTracker:
     Track how many emails we've sent to each recipient domain today.
     Prevents sending too many emails to the same company/ESP in one day.
 
+    Webmail providers (gmail.com, outlook.com, etc.) are given a much
+    higher daily cap because they're not single companies.
+
     Persisted to MongoDB so counts survive container restarts.
     """
 
-    def __init__(self, max_per_domain: int = 3):
+    # Webmail / free-email providers — these are NOT company domains,
+    # so the per-domain throttle should be much higher.
+    WEBMAIL_PROVIDERS = frozenset({
+        "gmail.com", "googlemail.com",
+        "outlook.com", "hotmail.com", "live.com", "msn.com",
+        "yahoo.com", "ymail.com", "rocketmail.com",
+        "aol.com", "aim.com",
+        "icloud.com", "me.com", "mac.com",
+        "protonmail.com", "proton.me",
+        "zoho.com", "zohomail.com",
+        "fastmail.com",
+        "mail.com", "email.com",
+        "gmx.com", "gmx.net",
+        "yandex.com", "yandex.ru",
+        "tutanota.com", "tuta.io",
+    })
+
+    def __init__(self, max_per_domain: int = 3, webmail_multiplier: int = 10):
         self.max_per_domain = max_per_domain
+        self.webmail_multiplier = webmail_multiplier
         # MongoDB-backed — collection: domain_send_counts
         from database import db
         self._collection = db["domain_send_counts"]
         self._collection.create_index(
             [("domain", 1), ("date", 1)], unique=True
         )
+
+    def _get_limit(self, domain: str) -> int:
+        """Return the daily send limit for a domain."""
+        if domain in self.WEBMAIL_PROVIDERS:
+            return self.max_per_domain * self.webmail_multiplier
+        return self.max_per_domain
 
     def _today_str(self) -> str:
         """Today's date string in the target timezone."""
@@ -444,11 +468,11 @@ class RecipientDomainTracker:
         today = self._today_str()
         record = self._collection.find_one({"domain": domain, "date": today})
         current = record["count"] if record else 0
-        allowed = current < self.max_per_domain
+        limit = self._get_limit(domain)
+        allowed = current < limit
         if not allowed:
             logger.info(
-                "domain_throttled",
-                extra={"domain": domain, "count": current, "max": self.max_per_domain},
+                f"domain_throttled: {domain} has {current}/{limit} sends today",
             )
         return allowed
 
@@ -473,6 +497,31 @@ class RecipientDomainTracker:
         today = self._today_str()
         record = self._collection.find_one({"domain": domain.lower(), "date": today})
         return record["count"] if record else 0
+
+    def get_saturated_domains(self) -> set:
+        """
+        Return the set of recipient domains that have already reached
+        their daily limit today.  Used by claim_next_ready() to pre-filter
+        drafts so we never claim→throttle→release the same draft in a loop.
+        """
+        today = self._today_str()
+        # Fetch all domains that have ANY sends today
+        cursor = self._collection.find(
+            {"date": today},
+            {"domain": 1, "count": 1, "_id": 0},
+        )
+        domains = set()
+        for doc in cursor:
+            domain = doc["domain"]
+            limit = self._get_limit(domain)
+            if doc["count"] >= limit:
+                domains.add(domain)
+        if domains:
+            logger.debug(
+                f"saturated_domains: {len(domains)} domains at limit "
+                f"(sample: {list(domains)[:5]})",
+            )
+        return domains
 
 
 # Global instance — shared across the v2 system

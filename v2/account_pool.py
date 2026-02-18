@@ -197,15 +197,14 @@ class AccountReputation:
     @staticmethod
     def refresh_all():
         """Recompute and save reputation for all accounts."""
-        logger.info("reputation_refresh_start", extra={"accounts": len(config.ZOHO_ACCOUNTS)})
+        logger.info(f"reputation_refresh_start: {len(config.ZOHO_ACCOUNTS)} accounts")
         for acct in config.ZOHO_ACCOUNTS:
             email = acct["email"]
             data = AccountReputation.compute_score(email)
             AccountReputation.save_score(email, data)
             if data["score"] < AccountReputation.WARNING_THRESHOLD:
                 logger.warning(
-                    "low_reputation",
-                    extra={"account": email, "score": data["score"], "reason": data["reason"]},
+                    f"low_reputation: {email} score={data['score']} reason={data['reason']}",
                 )
         logger.info("reputation_refresh_complete")
 
@@ -438,7 +437,7 @@ class AccountPool:
                 lock = self._get_lock(preferred_email)
                 if not lock.locked():
                     await lock.acquire()
-                    logger.info("account_acquired_preferred", extra={"account": preferred_email, "to": to_email})
+                    logger.info(f"account_acquired_preferred: {preferred_email} → {to_email}")
                     return acct
 
         # Collect eligible accounts
@@ -449,7 +448,7 @@ class AccountPool:
                 eligible.append(acct)
 
         if not eligible:
-            logger.warning("no_accounts_available", extra={"total_accounts": len(self.accounts)})
+            logger.warning(f"no_accounts_available: 0/{len(self.accounts)} eligible")
             return None
 
         logger.debug("eligible_accounts", extra={"count": len(eligible), "total": len(self.accounts)})
@@ -460,7 +459,7 @@ class AccountPool:
             lock = self._get_lock(acct["email"])
             if not lock.locked():
                 await lock.acquire()
-                logger.info("account_acquired", extra={"account": acct["email"], "to": to_email})
+                logger.info(f"account_acquired: {acct['email']} → {to_email}")
                 return acct
 
         # All eligible accounts are currently locked (in-flight sends)
@@ -536,15 +535,9 @@ class AccountPool:
 
         if chosen < normal:
             logger.info(
-                "dynamic_pace_catchup",
-                extra={
-                    "total_sent": total_sent,
-                    "remaining": remaining,
-                    "hours_left": round(hours_left, 1),
-                    "normal_cooldown": normal,
-                    "dynamic_cooldown": chosen,
-                    "required_per_hour": round(required_per_hour, 1),
-                },
+                f"dynamic_pace_catchup: sent={total_sent} remaining={remaining} "
+                f"hours_left={hours_left:.1f} cooldown={chosen}min (normal={normal}min) "
+                f"rate={required_per_hour:.1f}/hr",
             )
 
         return chosen
@@ -578,22 +571,12 @@ class AccountPool:
         if to_email:
             domain_tracker.record_send(to_email)
 
-        logger.info(
-            "send_recorded",
-            extra={
-                "account": account_email,
-                "cooldown_min": cooldown_min,
-                "to_email": to_email,
-            },
-        )
+        logger.info(f"send_recorded: {account_email} cooldown={cooldown_min}min to={to_email}")
 
     def mark_blocked(self, account_email: str, error_msg: str = None):
         """Mark account as blocked (e.g. 554 from Zoho)."""
         BlockedAccounts.mark_blocked(account_email, error_msg)
-        logger.error(
-            "account_blocked",
-            extra={"account": account_email, "error": error_msg},
-        )
+        logger.error(f"account_blocked: {account_email} error={error_msg}")
 
     def get_wait_time(self) -> int:
         """
