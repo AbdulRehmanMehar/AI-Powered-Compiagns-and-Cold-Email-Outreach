@@ -120,9 +120,11 @@ WARMUP_WEEK2_LIMIT = int(os.getenv("WARMUP_WEEK2_LIMIT", "12"))
 WARMUP_WEEK3_LIMIT = int(os.getenv("WARMUP_WEEK3_LIMIT", "25"))
 WARMUP_WEEK4_LIMIT = int(os.getenv("WARMUP_WEEK4_LIMIT", "45"))
 
-# Sending hours (US Eastern business hours: 9 AM - 5 PM)
+# Sending hours (US Eastern business hours: 7 AM - 7 PM)
+# Extended window (12h vs 8h) provides buffer for mid-window deployments.
+# Dynamic pacing accelerates if behind target after a restart.
 # Uses America/New_York timezone which auto-handles EST/EDT
 TARGET_TIMEZONE = os.getenv("TARGET_TIMEZONE", "America/New_York")
-SENDING_HOUR_START = int(os.getenv("SENDING_HOUR_START", "9"))    # 9 AM in target timezone
-SENDING_HOUR_END = int(os.getenv("SENDING_HOUR_END", "17"))       # 5 PM in target timezone
+SENDING_HOUR_START = int(os.getenv("SENDING_HOUR_START", "7"))    # 7 AM in target timezone
+SENDING_HOUR_END = int(os.getenv("SENDING_HOUR_END", "19"))       # 7 PM in target timezone
 SEND_ON_WEEKENDS = os.getenv("SEND_ON_WEEKENDS", "false").lower() == "true"

@@ -202,6 +202,33 @@ class AsyncScheduler:
         draft_stats = EmailDraft.get_stats()
         logger.info(f"Draft queue: {draft_stats}")
 
+        # Log pacing status — shows catch-up plan after restart
+        now = datetime.now(self.tz)
+        can_send, reason = self.pool._can_send_now()
+        total_sent = sum(
+            SendingStats.get_sends_today(a["email"]) for a in self.pool.accounts
+        )
+        remaining = max(0, config.GLOBAL_DAILY_TARGET - total_sent)
+        hours_left = max(0, config.SENDING_HOUR_END - now.hour - now.minute / 60.0)
+
+        if can_send and remaining > 0 and hours_left > 0:
+            required_rate = remaining / hours_left
+            active_accts = len([
+                a for a in self.pool.accounts
+                if not BlockedAccounts.is_blocked(a["email"])
+            ])
+            ideal_cooldown = 60.0 / (required_rate / max(1, active_accts))
+            logger.info(
+                f"── Pacing: {total_sent}/{config.GLOBAL_DAILY_TARGET} sent, "
+                f"{remaining} remaining in {hours_left:.1f}h → "
+                f"need {required_rate:.0f}/hr → "
+                f"~{min(20, max(3, int(ideal_cooldown)))} min cooldown (dynamic)"
+            )
+        elif not can_send:
+            logger.info(f"── Outside sending window: {reason}")
+        else:
+            logger.info(f"── Target met: {total_sent}/{config.GLOBAL_DAILY_TARGET} sent today")
+
         logger.info("── Startup Complete ──")
 
     async def _scheduler_loop(self):
@@ -257,10 +284,10 @@ class AsyncScheduler:
                     )
 
                 # ── Adaptive Campaign Check (every 2 hours during send window) ──
-                # Runs at: 09:00, 11:00, 13:00, 15:00
+                # Runs at: 07:00, 09:00, 11:00, 13:00, 15:00, 17:00
                 # Ensures we hit GLOBAL_DAILY_TARGET by fetching more leads if needed
                 if config.GLOBAL_DAILY_TARGET > 0:
-                    adaptive_hours = [9, 11, 13, 15]
+                    adaptive_hours = [7, 9, 11, 13, 15, 17]
                     if current_hour in adaptive_hours and current_minute == 0:
                         adaptive_key = f"adaptive_{today_str}_{current_hour}"
                         if adaptive_key not in last_run_dates:

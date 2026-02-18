@@ -722,8 +722,11 @@ class SendingStats:
     
     @staticmethod
     def get_total_sends_today() -> int:
-        """Get total sends today across all accounts"""
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        """Get total sends today across all accounts (target timezone aware)"""
+        import pytz
+        import config
+        tz = pytz.timezone(config.TARGET_TIMEZONE)
+        today = datetime.now(tz).strftime("%Y-%m-%d")
         pipeline = [
             {"$match": {"date": today}},
             {"$group": {"_id": None, "total": {"$sum": "$count"}}}

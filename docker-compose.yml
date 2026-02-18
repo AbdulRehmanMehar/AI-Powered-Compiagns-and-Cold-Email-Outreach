@@ -34,6 +34,8 @@ services:
       - WARMUP_WEEK2_LIMIT=${WARMUP_WEEK2_LIMIT:-12}
       - WARMUP_WEEK3_LIMIT=${WARMUP_WEEK3_LIMIT:-25}
       - WARMUP_WEEK4_LIMIT=${WARMUP_WEEK4_LIMIT:-45}
+      - SENDING_HOUR_START=${SENDING_HOUR_START:-7}
+      - SENDING_HOUR_END=${SENDING_HOUR_END:-19}
     healthcheck:
       test: ["CMD", "python", "-c", "from database import campaigns_collection; print('healthy') if campaigns_collection.database.client.server_info() else exit(1)"]
       interval: 30s

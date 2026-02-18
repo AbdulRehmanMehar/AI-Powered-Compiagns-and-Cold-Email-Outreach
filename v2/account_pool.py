@@ -473,21 +473,98 @@ class AccountPool:
         if lock.locked():
             lock.release()
 
+    def _get_dynamic_cooldown(self) -> int:
+        """
+        Calculate cooldown based on how far behind/ahead we are for the day.
+
+        If we're on-pace or ahead → use normal human-like cooldown.
+        If we're behind → shorten cooldown to catch up (min 3 min for deliverability).
+        If target is met → use normal cooldown.
+
+        This is the KEY feature that makes mid-window deployments survivable:
+        after a restart, the system detects it's behind and accelerates.
+        """
+        if config.GLOBAL_DAILY_TARGET <= 0:
+            return get_human_cooldown_minutes()
+
+        now = datetime.now(self.target_tz)
+        hour = now.hour + now.minute / 60.0
+
+        # Hours remaining in today's window
+        hours_left = max(0.25, config.SENDING_HOUR_END - hour)
+
+        # Total sent today (across all accounts)
+        # Use per-account sums with target timezone (consistent with get_sends_today)
+        total_sent = sum(
+            SendingStats.get_sends_today(a["email"]) for a in self.accounts
+        )
+        remaining = config.GLOBAL_DAILY_TARGET - total_sent
+
+        if remaining <= 0:
+            # Target already met — normal pace for any stragglers
+            return get_human_cooldown_minutes()
+
+        # How many active (non-blocked) accounts do we have?
+        active = len([
+            a for a in self.accounts
+            if not BlockedAccounts.is_blocked(a["email"])
+        ])
+        active = max(1, active)
+
+        # Required sends per hour across all accounts to hit target
+        required_per_hour = remaining / hours_left
+
+        # Required sends per account per hour
+        per_acct_per_hour = required_per_hour / active
+
+        # Convert to cooldown: 60 min / sends_per_hour = minutes_between_sends
+        if per_acct_per_hour > 0:
+            ideal_cooldown = 60.0 / per_acct_per_hour
+        else:
+            ideal_cooldown = get_human_cooldown_minutes()
+
+        # Clamp: never faster than 3 min (deliverability floor),
+        #         never slower than 20 min (or we won't finish)
+        FLOOR = 3
+        CEILING = 20
+        dynamic = int(max(FLOOR, min(CEILING, ideal_cooldown)))
+
+        # Compare with normal cooldown — use whichever is SHORTER
+        # (we only accelerate, never artificially slow down)
+        normal = get_human_cooldown_minutes()
+        chosen = min(dynamic, normal)
+
+        if chosen < normal:
+            logger.info(
+                "dynamic_pace_catchup",
+                extra={
+                    "total_sent": total_sent,
+                    "remaining": remaining,
+                    "hours_left": round(hours_left, 1),
+                    "normal_cooldown": normal,
+                    "dynamic_cooldown": chosen,
+                    "required_per_hour": round(required_per_hour, 1),
+                },
+            )
+
+        return chosen
+
     async def record_send(self, account_email: str, to_email: str = None):
         """
         Record a successful send — update stats, cooldown, domain tracker.
         Called AFTER the SMTP send succeeds.
         
-        Bounce-aware: If the account's recent bounce rate is elevated,
-        automatically lengthens the cooldown to slow down and protect reputation.
+        Uses dynamic pacing: if behind target, shortens cooldowns to catch up.
+        Bounce-aware: if bounce rate is elevated, lengthens cooldown to protect reputation.
         """
         # Increment daily counter (atomic $inc)
         SendingStats.increment_send(account_email)
 
-        # Set human-like cooldown, then apply bounce-rate slowdown if needed
-        cooldown_min = get_human_cooldown_minutes()
+        # Dynamic pacing — accelerates if behind daily target
+        cooldown_min = self._get_dynamic_cooldown()
         
         # Check recent bounce rate for this account and auto-throttle
+        # Bounce protection OVERRIDES catch-up acceleration (safety first)
         saved_rep = AccountReputation.get_saved_score(account_email)
         if saved_rep and saved_rep.get("bounce_rate", 0) > 0.03:
             from v2.human_behavior import get_bounce_slowdown_multiplier

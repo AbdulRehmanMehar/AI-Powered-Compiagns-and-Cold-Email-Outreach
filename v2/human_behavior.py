@@ -107,6 +107,8 @@ def is_holiday(target_date: date = None) -> Tuple[bool, Optional[str]]:
 # Pattern: mild variation to stay human-like without destroying throughput.
 # Old values (1.2/2.0/1.3/1.5) cut capacity by ~40%. Flattened to max 1.15.
 TIME_OF_DAY_MULTIPLIERS = {
+    7: 1.1,    # 07:00-08:00 — Early, slightly slower
+    8: 1.05,   # 08:00-09:00 — Warming up
     9: 1.0,    # 09:00-10:00 — Fresh start, normal pace
     10: 1.0,   # 10:00-11:00 — Still energetic
     11: 1.05,  # 11:00-12:00 — Slight pre-lunch slowdown
@@ -114,7 +116,9 @@ TIME_OF_DAY_MULTIPLIERS = {
     13: 1.05,  # 13:00-14:00 — Post-lunch, nearly normal
     14: 1.0,   # 14:00-15:00 — Back to normal
     15: 1.0,   # 15:00-16:00 — Afternoon push
-    16: 1.1,   # 16:00-17:00 — Slight wind-down
+    16: 1.05,  # 16:00-17:00 — Slight wind-down
+    17: 1.1,   # 17:00-18:00 — Late afternoon
+    18: 1.15,  # 18:00-19:00 — End of extended day
 }
 
 
@@ -414,24 +418,32 @@ class RecipientDomainTracker:
     """
     Track how many emails we've sent to each recipient domain today.
     Prevents sending too many emails to the same company/ESP in one day.
+
+    Persisted to MongoDB so counts survive container restarts.
     """
 
     def __init__(self, max_per_domain: int = 3):
         self.max_per_domain = max_per_domain
-        self._counts: Dict[str, int] = {}
-        self._date: date = date.today()
+        # MongoDB-backed — collection: domain_send_counts
+        from database import db
+        self._collection = db["domain_send_counts"]
+        self._collection.create_index(
+            [("domain", 1), ("date", 1)], unique=True
+        )
 
-    def _reset_if_new_day(self):
-        today = date.today()
-        if today != self._date:
-            self._counts = {}
-            self._date = today
+    def _today_str(self) -> str:
+        """Today's date string in the target timezone."""
+        tz = pytz.timezone(config.TARGET_TIMEZONE)
+        return datetime.now(tz).strftime("%Y-%m-%d")
 
     def can_send_to(self, email_address: str) -> bool:
         """Check if we can send another email to this recipient's domain."""
-        self._reset_if_new_day()
         domain = email_address.split("@")[-1].lower() if "@" in email_address else ""
-        current = self._counts.get(domain, 0)
+        if not domain:
+            return True
+        today = self._today_str()
+        record = self._collection.find_one({"domain": domain, "date": today})
+        current = record["count"] if record else 0
         allowed = current < self.max_per_domain
         if not allowed:
             logger.info(
@@ -441,19 +453,26 @@ class RecipientDomainTracker:
         return allowed
 
     def record_send(self, email_address: str):
-        """Record that we sent an email to this domain."""
-        self._reset_if_new_day()
+        """Record that we sent an email to this domain (atomic MongoDB upsert)."""
         domain = email_address.split("@")[-1].lower() if "@" in email_address else ""
-        self._counts[domain] = self._counts.get(domain, 0) + 1
+        if not domain:
+            return
+        today = self._today_str()
+        self._collection.update_one(
+            {"domain": domain, "date": today},
+            {"$inc": {"count": 1}},
+            upsert=True,
+        )
         logger.debug(
             "domain_send_recorded",
-            extra={"domain": domain, "count": self._counts[domain], "max": self.max_per_domain},
+            extra={"domain": domain, "max": self.max_per_domain},
         )
 
     def get_count(self, domain: str) -> int:
         """Get current count for a domain."""
-        self._reset_if_new_day()
-        return self._counts.get(domain.lower(), 0)
+        today = self._today_str()
+        record = self._collection.find_one({"domain": domain.lower(), "date": today})
+        return record["count"] if record else 0
 
 
 # Global instance — shared across the v2 system
