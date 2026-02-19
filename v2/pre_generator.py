@@ -70,6 +70,8 @@ class EmailDraft:
         to_email: str = None,
         to_name: str = None,
         scheduled_send_at: datetime = None,
+        icp_template: str = None,
+        is_icp: bool = None,
     ) -> str:
         doc = {
             "lead_id": ObjectId(lead_id),
@@ -92,6 +94,8 @@ class EmailDraft:
             "sent_at": None,
             "error_message": None,
             "retry_count": 0,
+            "icp_template": icp_template,
+            "is_icp": is_icp,
         }
         result = email_drafts_collection.insert_one(doc)
         draft_id = str(result.inserted_id)
@@ -479,20 +483,32 @@ class PreGenerator:
                         stats["skipped"] += 1
                         continue
                     elif verification.status == VerificationStatus.RISKY:
+                        # Skip risky emails (catch-all domains, etc.) — they bounce at ~90% rate
+                        if verification.checks.get("is_catch_all"):
+                            logger.info(f"Skipping {to_email} — catch-all domain (can't verify mailbox)")
+                            Lead.mark_invalid_email(lead_id, f"Catch-all domain: {verification.reason}")
+                            stats["skipped"] += 1
+                            continue
                         logger.warning(f"Risky email {to_email}: {verification.reason}")
-                        # Continue but log warning
+                        # Continue for other risky reasons (role-based scored low, etc.)
                 except Exception as e:
                     logger.error(f"Verification failed for {to_email}: {e}")
                     # Don't skip on verification error — might be network issue
 
             try:
                 # Create placeholder draft
+                # Extract ICP template name from campaign for analytics tracking
+                _icp_template = campaign_context.get("icp_template")
+                _is_icp = bool(_icp_template)
+
                 draft_id = EmailDraft.create(
                     lead_id=lead_id,
                     campaign_id=campaign_id,
                     email_type="initial",
                     to_email=to_email,
                     to_name=lead.get("first_name"),
+                    icp_template=_icp_template,
+                    is_icp=_is_icp,
                 )
 
                 # Generate email

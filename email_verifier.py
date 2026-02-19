@@ -154,7 +154,7 @@ class EmailVerifier:
                 )
             
             if smtp_result.get('catch_all'):
-                score -= 20
+                score -= 35  # Catch-all domains can't verify individual mailboxes — high bounce risk
                 reasons.append("Catch-all domain (can't verify individual mailbox)")
         else:
             checks['smtp_valid'] = None
@@ -173,7 +173,11 @@ class EmailVerifier:
             reasons.append("High digit ratio in local part")
         
         # Determine final status
-        if score >= 70:
+        # Catch-all domains are ALWAYS risky — even if other checks pass, we can't
+        # confirm the individual mailbox exists, so force RISKY status
+        if checks.get('is_catch_all'):
+            status = VerificationStatus.RISKY
+        elif score >= 70:
             status = VerificationStatus.VALID
         elif score >= 40:
             status = VerificationStatus.RISKY

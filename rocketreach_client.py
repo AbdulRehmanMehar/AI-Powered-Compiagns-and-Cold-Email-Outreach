@@ -136,7 +136,8 @@ def quick_email_check(email: str, check_mx: bool = True, check_bounced_domains: 
         'salesforce.com', 'oracle.com', 'ibm.com', 'intel.com', 'adobe.com',
         'vmware.com', 'cisco.com', 'dell.com', 'hp.com', 'sap.com',
         'linkedin.com', 'coinbase.com', 'stripe.com', 'square.com', 'paypal.com',
-        'upwork.com', 'fiverr.com'
+        'upwork.com', 'fiverr.com', 'youtube.com', 'spotify.com', 'snap.com',
+        'tiktok.com', 'bytedance.com', 'walmart.com', 'target.com'
     }
     if domain in large_company_domains:
         return False, f"Large company domain (high bounce risk): {domain}"
@@ -267,7 +268,9 @@ def full_email_verification(email: str, use_smtp: bool = True) -> tuple:
         elif smtp_valid is True:
             details['checks_passed'].append('smtp')
             if "Catch-all" in smtp_reason:
-                details['warning'] = smtp_reason
+                # Catch-all domains accept any address — can't confirm mailbox exists
+                details['checks_failed'].append(('smtp', smtp_reason))
+                return False, f"Catch-all domain — can't verify mailbox exists", details
         else:
             # Couldn't verify via SMTP - still allow but flag it
             details['warning'] = f"SMTP verification inconclusive: {smtp_reason}"
@@ -301,6 +304,7 @@ class RocketReachClient:
                       location: List[str] = None,
                       industry: List[str] = None,
                       keywords: List[str] = None,
+                      company_size: List[str] = None,
                       page_size: int = 10,
                       start: int = 1) -> Dict[str, Any]:
         """
@@ -314,6 +318,9 @@ class RocketReachClient:
             location: List of locations
             industry: List of industries
             keywords: List of keywords
+            company_size: List of employee count ranges (e.g. ["51-200", "201-500"])
+                          Valid values: "1-10", "11-50", "51-200", "201-500", 
+                          "501-1000", "1001-5000", "5001-10000", "10001+"
             page_size: Number of results per page (max 100)
             start: Starting position for pagination
         
@@ -344,6 +351,8 @@ class RocketReachClient:
             query_params["industry"] = industry if isinstance(industry, list) else [industry]
         if keywords:
             query_params["keyword"] = keywords if isinstance(keywords, list) else [keywords]
+        if company_size:
+            query_params["company_size"] = company_size if isinstance(company_size, list) else [company_size]
         
         if query_params:
             payload["query"] = query_params
@@ -453,14 +462,48 @@ class RocketReachClient:
         initial_start = start
         print(f"   📍 Starting RocketReach search from offset {start}")
         
+        # =====================================================================
+        # CRITICAL: RocketReach's `industry` filter uses an internal taxonomy
+        # that doesn't match LinkedIn/standard industry names. All our industry
+        # names (e.g. "Software - General", "Financial Services", "Construction")
+        # return 0 results when passed as the industry parameter.
+        #
+        # SOLUTION: Convert industry names into keyword terms and merge them
+        # with existing keywords. Keywords work perfectly:
+        #   industry="Construction" → 0 results
+        #   keyword="construction"  → 232 results
+        #   keyword="SaaS"         → 1,097 results
+        # =====================================================================
+        merged_keywords = list(criteria.get("keywords") or [])
+        industry_terms = criteria.get("industry") or criteria.get("industries") or []
+        if isinstance(industry_terms, str):
+            industry_terms = [industry_terms]
+        
+        if industry_terms:
+            existing_lower = {k.lower() for k in merged_keywords}
+            for term in industry_terms:
+                # Clean up formal industry names into search-friendly keywords
+                # "Software - General" → "software"
+                # "Hospitals & Healthcare" → "healthcare"
+                # "Insurance - General" → "insurance"
+                # "Advertising & Marketing" → "marketing"
+                simplified = term.split(" - ")[0]  # Remove "- General" suffixes
+                simplified = simplified.replace("Hospitals & ", "")  # "Hospitals & Healthcare" → "Healthcare"
+                simplified = simplified.lower().strip()
+                if simplified and simplified not in existing_lower:
+                    merged_keywords.append(simplified)
+                    existing_lower.add(simplified)
+            print(f"   🔀 Merged {len(industry_terms)} industry terms into keywords: {merged_keywords}")
+        
         while len(leads) < max_leads:
-            # Search for people - map campaign criteria keys to RocketReach API keys
+            # Search for people — NO industry param (broken), use keywords instead
             search_results = self.search_people(
                 current_title=criteria.get("current_title") or criteria.get("titles"),  # Support both keys
                 current_employer=criteria.get("current_employer"),
                 location=criteria.get("location"),
-                industry=criteria.get("industry") or criteria.get("industries"),  # Support both keys (but prefer keywords)
-                keywords=criteria.get("keywords"),
+                industry=None,  # DISABLED: RocketReach industry filter doesn't match standard industry names
+                keywords=merged_keywords if merged_keywords else None,
+                company_size=criteria.get("company_size"),  # Employee count ranges like ["51-200", "201-500"]
                 page_size=page_size,
                 start=start
             )
@@ -472,15 +515,16 @@ class RocketReachClient:
             if not profiles:
                 print(f"   ⚠️  No more profiles found at offset {start}")
                 
-                # FALLBACK: If we got zero results and we're using keywords, try without them
-                if start == initial_start and criteria.get("keywords"):
+                # FALLBACK 1: If we got zero results and we're using keywords, try without them
+                # (title + company_size alone gives thousands of results)
+                if start == initial_start and merged_keywords:
                     print(f"   🔄 Retrying without keywords for broader results...")
-                    broader_criteria = {k: v for k, v in criteria.items() if k != "keywords"}
                     search_results = self.search_people(
-                        current_title=broader_criteria.get("current_title") or broader_criteria.get("titles"),
-                        current_employer=broader_criteria.get("current_employer"),
-                        location=broader_criteria.get("location"),
-                        industry=broader_criteria.get("industry") or broader_criteria.get("industries"),
+                        current_title=criteria.get("current_title") or criteria.get("titles"),
+                        current_employer=criteria.get("current_employer"),
+                        location=criteria.get("location"),
+                        industry=None,  # Still disabled
+                        company_size=criteria.get("company_size"),
                         page_size=page_size,
                         start=start
                     )
@@ -489,7 +533,7 @@ class RocketReachClient:
                     total_available = pagination.get("total", 0)
                     
                     if profiles:
-                        print(f"   ✅ Found {len(profiles)} profiles with broader search")
+                        print(f"   ✅ Found {len(profiles)} profiles with broader search (title + company_size only)")
                         # Continue with these profiles (code below will process them)
                     else:
                         break
@@ -578,7 +622,8 @@ class RocketReachClient:
                             print(f"   ⚠️ Skipping {email} - SMTP: {smtp_reason}")
                             continue
                         elif smtp_valid is True and "Catch-all" in smtp_reason:
-                            print(f"   ⚡ Warning: {email} - {smtp_reason}")
+                            print(f"   ⚠️ Skipping {email} - Catch-all domain (can't verify mailbox)")
+                            continue
                         
                         if is_valid_email(email):
                             profile["email"] = email

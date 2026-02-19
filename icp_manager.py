@@ -346,10 +346,14 @@ Remember:
         Generate a complete campaign configuration from an ICP template.
         
         This creates everything needed to run a campaign:
-        - Search criteria
-        - Email context
-        - Pain points
+        - Search criteria (including company_size for qualified leads)
+        - Email context with persona psychographics
+        - Pain points and empathy context
         - Case study selection
+        
+        Chris Do framework: The persona context feeds into the email generator
+        so the LLM writes with empathy — understanding "the crap they deal with"
+        and "the hunger" they have.
         """
         # Get the ICP template
         template = ICP_TEMPLATES.get(icp_template)
@@ -360,13 +364,18 @@ Remember:
         case_study_key = template.get("relevant_case_study", "roboapply")
         case_study = CASE_STUDIES.get(case_study_key, CASE_STUDIES.get("roboapply", {}))
         
+        # Get persona psychographics (Chris Do framework)
+        persona = template.get("persona", {})
+        
         campaign = {
             "name": f"Campaign: {icp_template.replace('_', ' ').title()}",
             "description": template.get("description", ""),
             "target_criteria": {
                 "current_title": template.get("titles", []),
-                "location": ["United States", "Canada", "United Kingdom"],
-                "keywords": template.get("industries", []) + template.get("trigger_signals", [])[:2]
+                "location": template.get("location", ["United States", "Canada", "United Kingdom"]),
+                "keywords": template.get("keywords", []) + template.get("trigger_signals", [])[:2],
+                "industry": template.get("industries", []),
+                "company_size": template.get("company_size", []),  # Employee count filter for RocketReach
             },
             "campaign_context": {
                 "product_service": "senior engineering team for 8-week sprints",
@@ -375,7 +384,16 @@ Remember:
                 "case_study": case_study,
                 "front_end_offer": template.get("front_end_offer", "free 30-min architecture review"),
                 "trigger_signal": template.get("trigger_signals", ["actively building"])[0],
-                "icp_template": icp_template  # For tracking
+                "icp_template": icp_template,  # For tracking
+                
+                # === CHRIS DO PERSONA CONTEXT (feeds into email LLM for empathetic writing) ===
+                "persona_name": persona.get("name", ""),
+                "persona_archetype": persona.get("archetype", ""),
+                "persona_values": persona.get("values", ""),
+                "persona_fears": persona.get("fears", ""),
+                "persona_spending_logic": persona.get("spending_logic", ""),
+                "persona_the_crap": persona.get("the_crap_they_deal_with", ""),
+                "persona_the_hunger": persona.get("the_hunger", ""),
             }
         }
         

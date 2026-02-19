@@ -1564,6 +1564,13 @@ Remember:
             except Exception as e:
                 pass  # Silently fail - improvement is optional
         
+        # Extract persona psychographics from campaign context (Chris Do framework)
+        persona_fears = campaign_context.get('persona_fears', '')
+        persona_values = campaign_context.get('persona_values', '')
+        persona_the_crap = campaign_context.get('persona_the_crap', '')
+        persona_the_hunger = campaign_context.get('persona_the_hunger', '')
+        persona_spending_logic = campaign_context.get('persona_spending_logic', '')
+        
         # Step 1: Research the company (PROBLEM SNIFFING)
         research = self.research_company(lead)
         
@@ -1727,6 +1734,14 @@ CONTENT RULES:
 - Case study: use EXACTLY as provided, don't fabricate or change industry
 {improvement_prompt if improvement_prompt else ""}
 
+{f'''WHO YOU'RE WRITING TO (use this to inform tone and pain selection — do NOT quote these directly):
+- Their daily frustrations: {persona_the_crap}
+- What keeps them up at night: {persona_fears}
+- What they actually want: {persona_the_hunger}
+- How they justify big purchases: {persona_spending_logic}
+- What they respect: {persona_values}
+Use this to make Line 2 (Poke the Bear) resonate with what they ACTUALLY care about.''' if persona_the_crap else ''}
+
 Return JSON: {{"subject": "2-3 word subject", "body": "line1\\n\\nline2\\n\\nline3\\n\\nCTA\\nabdul"}}"""
 
         # Build enrichment context for AI pain point generation
@@ -1800,9 +1815,114 @@ Return JSON: {{"subject": "2-3 word subject", "body": "line1\\n\\nline2\\n\\nlin
                 f"curious — is {company} at the point where process overhead is eating into actual build time? that tipping point sneaks up on {their_space or industry or 'tech'} teams.",
                 f"does {company} have clear eng metrics, or is it more of a gut-feel situation? no shame either way — most {their_space or industry or 'tech'} companies are still figuring this out.",
             ],
+            'COO': [
+                f"is {company} still running core operations on spreadsheets and email? most coos i talk to in {their_space or industry or 'operations'} say they lose 2+ hours a day just keeping things organized.",
+                f"curious — does {company} have a handle on how much manual work is costing you per year? the numbers usually shock people when they actually calculate it.",
+                f"is {company}'s field team still capturing data on paper or clunky forms? every ops leader in {their_space or industry or 'the space'} i talk to says adoption is the real problem.",
+                f"does {company} have one system that actually runs the operation, or is it 5 tools held together with duct tape? no judgment — that's where most companies your size are.",
+                f"curious if {company}'s operational bottleneck is the process itself or the tools running it. usually it's both, but one is cheaper to fix.",
+                f"is {company} at the point where hiring more people doesn't actually speed things up because the process is the bottleneck? that's the hidden ceiling for {their_space or industry or 'growing'} companies.",
+            ],
+            'VP of Operations': [
+                f"is {company} losing hours every week to manual processes that should've been automated years ago? i hear that from every vp ops in {their_space or industry or 'the space'}.",
+                f"curious — does {company}'s operations team have real-time visibility, or are you always working with yesterday's data? that gap kills efficiency.",
+                f"is {company} struggling with adoption every time you try to roll out a new tool? most ops teams in {their_space or industry or 'your industry'} say that's their #1 challenge.",
+                f"does {company} have that problem where the saas tools you bought don't actually fit how your team works? seems like every ops leader hits that wall.",
+            ],
+            'Chief Revenue Officer': [
+                f"is {company}'s revenue team blocked by internal tooling that engineering keeps deprioritizing? every cro i talk to says the same thing — growth tools always lose to 'core product.'",
+                f"curious — does {company} have a customer portal or self-service tools, or is your cs team still doing everything manually? that's a churn risk most {their_space or industry or 'saas'} companies ignore.",
+                f"is {company}'s customer experience bottlenecked by engineering bandwidth? i keep hearing from revenue leaders that tooling gaps are the silent growth killer.",
+                f"does {company} have full visibility into what's actually causing churn, or is the data scattered across 5 systems? revenue leaders in {their_space or industry or 'B2B'} tell me it's almost always the latter.",
+            ],
+            'VP of Sales': [
+                f"is {company}'s sales team spending more time on manual workflows than actually selling? seems like every vp sales in {their_space or industry or 'B2B'} is dealing with that.",
+                f"curious — does {company} have the customer-facing tools to match your sales pitch, or is there a gap between what you promise and what the product delivers? honest question.",
+                f"is {company} losing deals because the demo experience doesn't match what competitors are showing? i keep hearing that from sales leaders in {their_space or industry or 'the space'}.",
+                f"does {company}'s sales ops run on zaps and spreadsheets that break at the worst possible time? you're not alone — most growing {their_space or industry or 'B2B'} companies are duct-taping it too.",
+            ],
+            'VP of Customer Success': [
+                f"is {company}'s cs team drowning in manual work because the self-service tools just aren't there? every vp cs i talk to in {their_space or industry or 'saas'} says the same thing.",
+                f"curious — does {company} have a real customer health dashboard, or is your team relying on gut feel and spreadsheets? that's the churn blind spot.",
+                f"is {company} losing customers not because of the product but because the experience around it is clunky? happens all the time in {their_space or industry or 'tech'}.",
+            ],
+            'Managing Director': [
+                f"is {company} landing client projects but struggling with the development side — finding reliable engineers to actually build the work? that's the story with most agencies i talk to.",
+                f"curious — does {company} have a consistent technical partner, or is every project a scramble to find freelancers? the good agencies i know solved that problem and never looked back.",
+                f"is {company} at the point where dev quality is the difference between keeping and losing your biggest clients? one bad delivery and the relationship is toast.",
+                f"does {company} want to offer more technical services but can't hire engineers at agency margins? i hear that from managing directors all the time.",
+            ],
+            'VP of E-Commerce': [
+                f"is {company}'s current platform the thing holding back your conversion rate? most vps of e-commerce i talk to say their site speed alone is costing them 10-15% of revenue.",
+                f"curious — has {company} outgrown shopify or whatever you started on? that inflection point is brutal for {their_space or industry or 'DTC'} brands.",
+                f"is {company} running into the problem where every shopify app slows the site down and you can't customize the checkout? you're not alone.",
+                f"does {company} have full control over the buying experience, or are you limited by what the platform allows? most {their_space or industry or 'e-commerce'} leaders hit that ceiling fast.",
+            ],
+            'Chief Data Officer': [
+                f"is {company}'s data team spending 80% of their time maintaining legacy reports instead of building what the business needs? every cdo i talk to says the ratio is backwards.",
+                f"curious — does {company} have a 'single source of truth' or does every department have their own version? i keep hearing there are usually 5+ competing ones.",
+                f"is {company}'s board asking for ai-powered insights but your data infrastructure isn't ready for it? that gap is everywhere right now in {their_space or industry or 'enterprise'}.",
+                f"does {company}'s analytics team trust the data warehouse, or does everyone still export to excel? no shame — most {their_space or industry or 'the'} companies are in the same boat.",
+            ],
+            'VP of Data': [
+                f"is {company}'s data pipeline held together with legacy etl jobs that nobody wants to touch? every vp data i know is dealing with that exact problem.",
+                f"curious — is {company} trying to add an ai layer on top of data that isn't clean yet? that's like building a mansion on quicksand.",
+                f"does {company}'s data team have time to build new things, or is it all maintenance and fire drills? that ratio tells you everything about where you are.",
+            ],
+            'CISO': [
+                f"is {company} dealing with the pressure to move fast on ai features while keeping everything compliant? every ciso in {their_space or industry or 'regulated'} industries is feeling that tension.",
+                f"curious — does {company} have full confidence that every vendor integration meets your security standards? or is it more of a hope-and-pray situation?",
+                f"is {company}'s engineering team shipping compliant code from day one, or is security always a 3-month afterthought? that gap is expensive in {their_space or industry or 'your space'}.",
+            ],
         }
         # Get role-specific questions or default
+        # Normalize title to match pain_questions keys (RocketReach returns varied forms)
         title_key = title.split('&')[0].strip() if '&' in title else title
+        
+        # Title alias map: maps common RocketReach title variations to pain_questions keys
+        _title_aliases = {
+            'VP of Engineering': 'VP Engineering',
+            'Co-Founder': 'Founder',
+            'Chief Technology Officer': 'CTO',
+            'VP of Product': 'VP Product',
+            'Head of Product': 'VP Product',
+            'Product Director': 'VP Product',
+            'CPO': 'VP Product',
+            'Director of Product': 'VP Product',
+            'Engineering Director': 'Director of Engineering',
+            'VP of Technology': 'CTO',
+            'VP of IT': 'CTO',
+            'IT Director': 'CTO',
+            'Head of Technology': 'CTO',
+            'Principal Architect': 'CTO',
+            'Chief Innovation Officer': 'CTO',
+            'Head of AI': 'CTO',
+            'Director of Operations': 'VP of Operations',
+            'Head of Operations': 'VP of Operations',
+            'Operations Manager': 'COO',
+            'VP of Supply Chain': 'VP of Operations',
+            'VP of Logistics': 'VP of Operations',
+            'VP of Revenue Operations': 'Chief Revenue Officer',
+            'Head of Revenue Operations': 'Chief Revenue Officer',
+            'VP of Business Development': 'VP of Sales',
+            'Head of Growth': 'VP of Sales',
+            'Head of Digital': 'VP of E-Commerce',
+            'VP of Digital Product': 'VP of E-Commerce',
+            'Director of E-Commerce': 'VP of E-Commerce',
+            'Head of E-Commerce': 'VP of E-Commerce',
+            'Chief Digital Officer': 'VP of E-Commerce',
+            'VP of Analytics': 'Chief Data Officer',
+            'Head of Data Engineering': 'Chief Data Officer',
+            'Director of Business Intelligence': 'Chief Data Officer',
+            'VP of Business Intelligence': 'Chief Data Officer',
+            'Head of Analytics': 'Chief Data Officer',
+            'VP of Delivery': 'Managing Director',
+            'Partner': 'Managing Director',
+            'Creative Director': 'Managing Director',
+            'Chief Strategy Officer': 'Managing Director',
+        }
+        title_key = _title_aliases.get(title_key, title_key)
+        
         role_questions = pain_questions.get(title_key, pain_questions.get('CEO', []))
         selected_pain_question = random.choice(role_questions)
         

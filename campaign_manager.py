@@ -753,6 +753,12 @@ class CampaignManager:
                     Lead.mark_invalid_email(lead_id, f"Verification failed: {verification.reason}")
                     continue
                 elif verification.status == VerificationStatus.RISKY:
+                    if verification.checks.get('is_catch_all'):
+                        print(f"⛔ Skipping {lead_email} - catch-all domain (can't verify mailbox)")
+                        results["skipped"] += 1
+                        results["skipped_catch_all"] = results.get("skipped_catch_all", 0) + 1
+                        Lead.mark_invalid_email(lead_id, f"Catch-all domain: {verification.reason}")
+                        continue
                     print(f"⚠️  Warning: {lead_email} is risky (score: {verification.score}) - {verification.reason}")
                     # Continue but log the warning
                 
@@ -1062,6 +1068,10 @@ class CampaignManager:
                     results["skipped_invalid_mx_smtp"] = results.get("skipped_invalid_mx_smtp", 0) + 1
                     continue
                 elif verification.status == VerificationStatus.RISKY:
+                    if verification.checks.get('is_catch_all'):
+                        print(f"⛔ Skipping followup for {lead_email} - catch-all domain")
+                        results["skipped_catch_all"] = results.get("skipped_catch_all", 0) + 1
+                        continue
                     print(f"⚠️  Warning: {lead_email} is risky (score: {verification.score}) - {verification.reason}")
                 
                 # LEAD ENRICHMENT: Ensure we have enrichment data for follow-up personalization
