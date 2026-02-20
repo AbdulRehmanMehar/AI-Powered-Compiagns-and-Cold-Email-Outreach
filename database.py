@@ -147,7 +147,10 @@ class Lead:
             "raw_data": data,
             "updated_at": datetime.utcnow(),
             # Campaign association - which campaign fetched this lead
-            "campaign_id": campaign_id or data.get("campaign_id"),
+            # MUST be ObjectId to match how email_drafts/emails store it
+            "campaign_id": ObjectId(campaign_id) if campaign_id else (
+                ObjectId(data["campaign_id"]) if data.get("campaign_id") else None
+            ),
             # ICP Tracking (TK Kader Framework)
             "is_icp": data.get("is_icp"),  # True/False - core classification
             "icp_template": data.get("icp_template"),  # Which template matched

@@ -43,6 +43,7 @@ FETCH_AMOUNT               = 200    # leads to request per replenishment call
 MIN_FETCH_INTERVAL_SECS    = 7_200  # 2 h cooldown per campaign between RocketReach calls
 REPLENISH_CHECK_INTERVAL   = 300    # only scan campaigns every 5 min
 DRAFT_ACTIVATION_INTERVAL  = 1_800  # only scan for new draft campaigns every 30 min
+MAX_REPLENISH_PER_CYCLE    = 3      # cap RocketReach fetches per cycle to prevent blocking
 
 # ── EmailDraft collection ────────────────────────────────────────────
 email_drafts_collection = db["email_drafts"]
@@ -257,14 +258,39 @@ class EmailDraft:
 
     @staticmethod
     def cleanup_stale_claimed(timeout_minutes: int = 30):
-        """Release drafts that were claimed but never sent (e.g. crash)."""
+        """
+        Release drafts that were claimed but never sent (e.g. crash), and
+        fail drafts that got stuck in 'generating' (pre_generator crashed
+        mid-generation without calling mark_failed).
+        """
         cutoff = datetime.utcnow() - timedelta(minutes=timeout_minutes)
-        result = email_drafts_collection.update_many(
+
+        # claimed → ready  (send_worker crashed before sending)
+        claimed_result = email_drafts_collection.update_many(
             {"status": DraftStatus.CLAIMED, "claimed_at": {"$lt": cutoff}},
             {"$set": {"status": DraftStatus.READY}},
         )
-        if result.modified_count:
-            logger.info(f"Released {result.modified_count} stale claimed drafts")
+        if claimed_result.modified_count:
+            logger.info(
+                f"cleanup_stale_claimed: released {claimed_result.modified_count} "
+                f"claimed drafts back to ready"
+            )
+
+        # generating → failed  (pre_generator crashed before mark_ready/mark_failed)
+        gen_result = email_drafts_collection.update_many(
+            {"status": DraftStatus.GENERATING, "created_at": {"$lt": cutoff}},
+            {
+                "$set": {
+                    "status": DraftStatus.FAILED,
+                    "error_message": "Stale generating: pre_generator crashed mid-generation",
+                }
+            },
+        )
+        if gen_result.modified_count:
+            logger.warning(
+                f"cleanup_stale_generating: failed {gen_result.modified_count} "
+                f"drafts stuck in 'generating' for >{timeout_minutes}min"
+            )
 
 
 class PreGenerator:
@@ -436,11 +462,11 @@ class PreGenerator:
                 EmailDraft.cleanup_stale_claimed(timeout_minutes=30)
 
                 # ── Auto-replenishment ────────────────────────────────
-                # Fetch more leads from RocketReach when a campaign's
-                # pipeline runs dry, and activate new ICP draft campaigns
-                # without manual intervention.
-                await self._replenish_leads_if_needed(shutdown_event, cm, active)
+                # IMPORTANT: Activate draft campaigns FIRST — this is fast
+                # and makes new campaigns available for the next cycle.
+                # Replenishment runs AFTER and is capped to prevent blocking.
                 await self._activate_draft_campaigns(shutdown_event, cm)
+                await self._replenish_leads_if_needed(shutdown_event, cm, active)
 
                 # ── Adaptive sleep ────────────────────────────────────
                 ready = EmailDraft.get_ready_count()
@@ -529,10 +555,13 @@ class PreGenerator:
                 continue
 
             # Count leads that haven't been drafted yet for this campaign
+            # NOTE: leads may store campaign_id as ObjectId OR string (legacy)
+            cid_oid = campaign["_id"]  # ObjectId
+            cid_str = str(cid_oid)     # string equivalent
             all_lead_ids = set(
                 str(d["_id"])
                 for d in leads_collection.find(
-                    {"campaign_id": campaign["_id"]}, {"_id": 1}
+                    {"campaign_id": {"$in": [cid_oid, cid_str]}}, {"_id": 1}
                 )
             )
             drafted_lead_ids = set(
@@ -576,11 +605,21 @@ class PreGenerator:
                     continue
 
             # Both thresholds breached — fetch more leads
+            # Cap how many campaigns we replenish per cycle to avoid blocking
+            # the entire generation loop for hours.
+            if triggered_count >= MAX_REPLENISH_PER_CYCLE:
+                logger.info(
+                    f"replenish_cap_reached: already fetched for {triggered_count} campaign(s) "
+                    f"this cycle — deferring campaign={cid[:8]}... name={c_name!r} to next scan"
+                )
+                continue
+
             triggered_count += 1
             logger.info(
                 f"replenish_triggered: campaign={cid[:8]}... name={c_name!r} "
                 f"ready={ready} unprocessed={unprocessed} — "
-                f"fetching {FETCH_AMOUNT} leads from RocketReach"
+                f"fetching {FETCH_AMOUNT} leads from RocketReach "
+                f"({triggered_count}/{MAX_REPLENISH_PER_CYCLE} budget)"
             )
             try:
                 leads_fetched = await asyncio.to_thread(
@@ -655,6 +694,7 @@ class PreGenerator:
             )
 
         activated_count = 0
+        fetches_this_round = 0
         for campaign in draft_campaigns:
             if shutdown_event.is_set():
                 break
@@ -669,8 +709,9 @@ class PreGenerator:
                 )
                 continue
 
+            # Query with both types — leads may store campaign_id as string (legacy)
             lead_count = leads_collection.count_documents(
-                {"campaign_id": campaign["_id"]}
+                {"campaign_id": {"$in": [campaign["_id"], cid]}}
             )
 
             if lead_count > 0:
@@ -696,6 +737,17 @@ class PreGenerator:
                     continue
 
             self._activating_campaigns.add(cid)
+
+            # Cap RocketReach fetches to avoid blocking for hours
+            if fetches_this_round >= MAX_REPLENISH_PER_CYCLE:
+                logger.info(
+                    f"draft_activation_deferred: {cid[:8]}... name={c_name!r} "
+                    f"— already fetched {fetches_this_round} campaigns this round"
+                )
+                self._activating_campaigns.discard(cid)
+                continue
+
+            fetches_this_round += 1
             logger.info(
                 f"draft_activation_start: {cid[:8]}... name={c_name!r} "
                 f"leads_in_db=0 — fetching {FETCH_AMOUNT} leads from RocketReach"

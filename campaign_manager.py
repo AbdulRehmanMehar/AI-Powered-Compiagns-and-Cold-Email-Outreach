@@ -163,10 +163,24 @@ class CampaignManager:
         # Find leads without sent emails - OLDEST FIRST (FIFO)
         # Only include leads created after cutoff date
         # Exclude leads already marked as invalid (bounced, failed verification, RocketReach invalid)
+        # CRITICAL: Only return leads from ACTIVE campaigns — draft/disabled campaign
+        # leads would never match in run_continuous() and block the pipeline.
+        # NOTE: Legacy leads may store campaign_id as string instead of ObjectId —
+        # include both representations until data is fully migrated.
+        from database import campaigns_collection, Campaign as _Campaign
+        active_campaign_oids = [
+            c["_id"]
+            for c in campaigns_collection.find(
+                {"status": _Campaign.STATUS_ACTIVE}, {"_id": 1}
+            )
+        ]
+        active_campaign_strs = [str(oid) for oid in active_campaign_oids]
+        
         pending_leads = []
         query = {
             "created_at": {"$gte": cutoff_date},
-            "email_invalid": {"$ne": True}
+            "email_invalid": {"$ne": True},
+            "campaign_id": {"$in": active_campaign_oids + active_campaign_strs},
         }
         
         # Placeholder company names that indicate incomplete lead data
