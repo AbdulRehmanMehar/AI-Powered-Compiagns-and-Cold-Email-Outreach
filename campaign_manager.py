@@ -140,10 +140,14 @@ class CampaignManager:
         cutoff_date = datetime(2026, 1, 29, 0, 0, 0)
         
         # Get all lead IDs that have been successfully sent an email
-        sent_lead_ids = set(emails_collection.distinct(
-            "lead_id", 
-            {"status": {"$in": ["sent", "opened", "replied"]}}
-        ))
+        # NOTE: distinct() returns ObjectId values — must convert to str for comparison
+        # against lead_id (which is also stringified below)
+        sent_lead_ids = set(
+            str(oid) for oid in emails_collection.distinct(
+                "lead_id",
+                {"status": {"$in": ["sent", "opened", "replied"]}}
+            )
+        )
         
         # Get lead IDs that already have active drafts (not failed/skipped)
         # This prevents the pre-gen loop from returning the same leads every cycle
