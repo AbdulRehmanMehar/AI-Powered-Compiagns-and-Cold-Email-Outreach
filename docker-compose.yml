@@ -36,6 +36,10 @@ services:
       - WARMUP_WEEK4_LIMIT=${WARMUP_WEEK4_LIMIT:-45}
       - SENDING_HOUR_START=${SENDING_HOUR_START:-7}
       - SENDING_HOUR_END=${SENDING_HOUR_END:-19}
+      - MAX_REPLENISH_PER_CYCLE=${MAX_REPLENISH_PER_CYCLE:-1}
+      - WARMUP_EMAILS=${WARMUP_EMAILS:-mehars.6925@gmail.com,abdrehman6925@gmail.com,webdeveloper.6925@gmail.com}
+      - WARMUP_EMAILS_APP_PASSWORDS=${WARMUP_EMAILS_APP_PASSWORDS:-}
+      - PRIMARY_SENDER_MODE=${PRIMARY_SENDER_MODE:-zoho}
     healthcheck:
       test: ["CMD", "python", "-c", "from database import campaigns_collection; print('healthy') if campaigns_collection.database.client.server_info() else exit(1)"]
       interval: 30s

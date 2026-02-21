@@ -78,8 +78,8 @@ class SendWorker:
 
     def __init__(self, account_pool: AccountPool):
         self.pool = account_pool
-        self.smtp_host = config.ZOHO_SMTP_HOST
-        self.smtp_port = config.ZOHO_SMTP_PORT
+        self.smtp_host = config.PRODUCTION_SMTP_HOST
+        self.smtp_port = config.PRODUCTION_SMTP_PORT
         self._shutdown = asyncio.Event()
         self._in_flight_draft_id: Optional[str] = None
 
@@ -193,12 +193,29 @@ class SendWorker:
         self._in_flight_draft_id = draft_id
         to_email = draft.get("to_email", "")
         preferred_account = draft.get("from_account")
+        email_type = draft.get("email_type", "initial")
+        followup_number = draft.get("followup_number", 0)
+        
         logger.info(
             f"processing_draft: {draft_id[:8]}... to={to_email} "
-            f"type={draft.get('email_type')} followup={draft.get('followup_number', 0)}",
+            f"type={email_type} followup={followup_number}",
         )
 
         try:
+            # ACCOUNT MISMATCH PROTECTION: For follow-ups, validate from_account is available
+            if email_type == "followup" and preferred_account:
+                available_accounts = {acc["email"] for acc in config.PRODUCTION_ACCOUNTS}
+                if preferred_account not in available_accounts:
+                    logger.warning(
+                        f"⏭️  SKIPPING follow-up: from_account={preferred_account} "
+                        f"not available in {config.PRIMARY_SENDER_MODE} mode. "
+                        f"Available: {sorted(available_accounts)}",
+                    )
+                    # Release draft for retry later when mode might change
+                    EmailDraft.release_claimed(draft_id)
+                    self._in_flight_draft_id = None
+                    return False
+
             # Acquire an account
             account = await self.pool.acquire_account(
                 preferred_email=preferred_account,

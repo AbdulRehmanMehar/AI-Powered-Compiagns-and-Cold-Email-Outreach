@@ -88,6 +88,14 @@ from v2.alerts import (
 from v2.human_behavior import is_holiday, plan_daily_sessions
 from v2.imap_worker import ImapWorker
 from v2.pre_generator import EmailDraft, PreGenerator
+
+# Warmup system (separate module, runs every 4 hours)
+try:
+    from warmup_bidirectional import run_bidirectional_warmup_cycle
+    WARMUP_AVAILABLE = config.WARMUP_ACCOUNTS and len(config.WARMUP_ACCOUNTS) > 0
+except ImportError:
+    WARMUP_AVAILABLE = False
+    logger.warning("⚠️  warmup_bidirectional module not available")
 from v2.send_worker import SendWorker
 
 
@@ -131,23 +139,25 @@ class AsyncScheduler:
         logger.info("Cold Email System v2 — Starting")
         logger.info("=" * 60)
         logger.info(f"Timezone: {config.TARGET_TIMEZONE}")
-        logger.info(f"Accounts: {len(config.ZOHO_ACCOUNTS)}")
+        logger.info(f"Sender mode: {config.PRIMARY_SENDER_MODE.upper()}")
+        logger.info(f"Accounts: {len(config.PRODUCTION_ACCOUNTS)} ({config.PRIMARY_SENDER_MODE})")
         logger.info(f"Sending hours: {config.SENDING_HOUR_START}:00 - {config.SENDING_HOUR_END}:00")
         logger.info(f"Hard cap/mailbox: {config.EMAILS_PER_DAY_PER_MAILBOX}")
         logger.info(f"Warmup: {'ON (week4+ cap=' + str(config.WARMUP_WEEK4_LIMIT) + ')' if config.WARMUP_ENABLED else 'OFF'}")
+        logger.info(f"Warmup Bidirectional: {'ON' if WARMUP_AVAILABLE else 'OFF (no test accounts configured)'}")
         logger.info(f"Cooldown: {config.MIN_DELAY_BETWEEN_EMAILS}-{config.MAX_DELAY_BETWEEN_EMAILS} min base")
         if config.GLOBAL_DAILY_TARGET > 0:
-            logger.info(f"Global target: {config.GLOBAL_DAILY_TARGET}/day → ~{-(-config.GLOBAL_DAILY_TARGET // len(config.ZOHO_ACCOUNTS))}/account")
+            logger.info(f"Global target: {config.GLOBAL_DAILY_TARGET}/day → ~{-(-config.GLOBAL_DAILY_TARGET // len(config.PRODUCTION_ACCOUNTS))}/account")
 
         # Register signal handlers
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, self._handle_signal, sig)
 
-        # Startup sequence
+        # Startup sequence (non-blocking IMAP check)
         await self._startup_phase()
 
-        # Launch persistent workers
+        # Launch ALL persistent workers regardless of mode
         self._tasks = [
             asyncio.create_task(self.send_worker.run(), name="send_worker"),
             asyncio.create_task(self.imap_worker.run_periodic(interval_minutes=30), name="imap_worker"),
@@ -156,7 +166,14 @@ class AsyncScheduler:
             asyncio.create_task(self._heartbeat_loop(), name="heartbeat"),
         ]
 
-        logger.info("All workers launched — system running")
+        # Warmup bidirectional (every 4 hours) — alongside campaigns
+        if WARMUP_AVAILABLE:
+            self._tasks.append(
+                asyncio.create_task(self._warmup_loop(), name="warmup_worker")
+            )
+            logger.info("🔥 Warmup bidirectional: ENABLED (every 4 hours)")
+
+        logger.info(f"Workers launched: {[t.get_name() for t in self._tasks]}")
 
         # Wait for shutdown
         await self._shutdown.wait()
@@ -165,7 +182,7 @@ class AsyncScheduler:
         await self._graceful_shutdown()
 
     async def _startup_phase(self):
-        """Run startup checks (same as legacy Phase 1-4 but concurrent)."""
+        """Run startup checks (non-blocking IMAP)."""
         logger.info("── Startup Phase ──")
 
         # Clean expired blocks
@@ -179,13 +196,19 @@ class AsyncScheduler:
         if is_hol:
             logger.warning(f"Today is {hol_name} — sending will be paused")
 
-        # Initial IMAP check (replies + bounces)
-        logger.info("Checking replies and bounces...")
-        imap_results = await self.imap_worker.check_all()
-        logger.info(
-            f"IMAP: {imap_results['total_replies']} replies, "
-            f"{imap_results['total_bounces']} bounces"
-        )
+        # Initial IMAP check — non-blocking with 60s timeout so startup
+        # never hangs (e.g. slow Gmail IMAP on warmup accounts).
+        logger.info("Checking replies and bounces (60s timeout)...")
+        try:
+            imap_results = await asyncio.wait_for(
+                self.imap_worker.check_all(), timeout=60
+            )
+            logger.info(
+                f"IMAP: {imap_results['total_replies']} replies, "
+                f"{imap_results['total_bounces']} bounces"
+            )
+        except asyncio.TimeoutError:
+            logger.warning("IMAP startup check timed out (60s) — continuing, periodic check will retry")
 
         # Refresh account reputations
         await asyncio.to_thread(AccountReputation.refresh_all)
@@ -458,6 +481,57 @@ class AsyncScheduler:
                 break
             except asyncio.TimeoutError:
                 continue
+
+    async def _warmup_loop(self):
+        """
+        Run bidirectional warmup cycle every 4 hours (non-blocking).
+        
+        Completely independent from campaign sending:
+        - Generates templates via Groq
+        - Sends to test Gmail accounts from Zoho
+        - Monitors IMAP for placement (inbox vs spam)
+        - Auto-replies with contextual messages
+        
+        Doesn't interfere with campaign pipeline (separate collection).
+        """
+        first_run = True
+        warmup_interval_seconds = 4 * 3600  # 4 hours
+        
+        while not self._shutdown.is_set():
+            try:
+                if first_run:
+                    logger.info("🔥 Starting bidirectional warmup cycle...")
+                    first_run = False
+                
+                # Run warmup cycle (non-blocking)
+                result = await run_bidirectional_warmup_cycle()
+                
+                # Log results
+                sent = result.get("sent", 0)
+                replies = result.get("replies", 0)
+                placement = result.get("placement", {})
+                inbox = placement.get("inbox", 0)
+                spam = placement.get("spam", 0)
+                spam_rate = placement.get("spam_rate", "N/A")
+                
+                logger.info(
+                    f"🔥 Warmup cycle complete: "
+                    f"sent={sent} replies={replies} "
+                    f"inbox={inbox} spam={spam} ({spam_rate})"
+                )
+                
+            except Exception as e:
+                logger.error(f"❌ Warmup cycle failed: {e}", exc_info=True)
+            
+            # Wait for next cycle (4 hours) or until shutdown
+            try:
+                await asyncio.wait_for(
+                    self._shutdown.wait(), 
+                    timeout=warmup_interval_seconds
+                )
+                break  # Shutdown requested
+            except asyncio.TimeoutError:
+                continue  # Next cycle
 
     def _handle_signal(self, sig):
         """Handle SIGTERM / SIGINT for graceful shutdown."""

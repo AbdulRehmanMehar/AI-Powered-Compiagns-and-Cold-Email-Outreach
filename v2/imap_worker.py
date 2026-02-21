@@ -186,12 +186,21 @@ def _is_unsubscribe_request(subject: str, body: str) -> bool:
 # ── Core IMAP checking (synchronous, run via to_thread) ──────────────
 
 def _get_sent_email_addresses() -> Set[str]:
-    """Get all email addresses we've sent to (same as reply_detector.py)."""
+    """Get all email addresses we've sent to (same as reply_detector.py).
+    
+    Filters out warmup emails (which have no lead_id since they're not campaign emails).
+    """
     sent_emails = emails_collection.find(
-        {"status": {"$in": [Email.STATUS_SENT, Email.STATUS_OPENED]}},
+        {
+            "status": {"$in": [Email.STATUS_SENT, Email.STATUS_OPENED]},
+            "lead_id": {"$exists": True}  # Skip warmup emails (no lead_id)
+        },
         {"lead_id": 1},
     )
     lead_ids = [e["lead_id"] for e in sent_emails]
+    if not lead_ids:
+        return set()
+    
     leads = leads_collection.find({"_id": {"$in": lead_ids}}, {"email": 1})
     return {lead["email"].lower() for lead in leads if lead.get("email")}
 
@@ -219,7 +228,7 @@ def _check_account_replies(
 
     try:
         mail = imaplib.IMAP4_SSL(
-            config.ZOHO_IMAP_HOST, config.ZOHO_IMAP_PORT, timeout=30
+            config.PRODUCTION_IMAP_HOST, config.PRODUCTION_IMAP_PORT, timeout=30
         )
         mail.login(account["email"], account["password"])
         logger.debug("imap_connected", extra={"account": account["email"]})
@@ -443,7 +452,7 @@ class ImapWorker:
     """
 
     def __init__(self, since_days: int = 7):
-        self.accounts = config.ZOHO_ACCOUNTS
+        self.accounts = config.PRODUCTION_ACCOUNTS
         self.since_days = since_days
         self._shutdown = asyncio.Event()
 
@@ -465,16 +474,31 @@ class ImapWorker:
             },
         )
 
-        # Run all accounts concurrently
-        tasks = [
-            asyncio.to_thread(
-                _check_account_replies,
-                account,
-                sent_to,
-                self.since_days,
-            )
-            for account in self.accounts
-        ]
+        # Run all accounts concurrently (30s timeout per account)
+        async def _check_with_timeout(account):
+            try:
+                return await asyncio.wait_for(
+                    asyncio.to_thread(
+                        _check_account_replies,
+                        account,
+                        sent_to,
+                        self.since_days,
+                    ),
+                    timeout=30,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "imap_account_timeout",
+                    extra={"account": account["email"], "timeout": 30},
+                )
+                return {
+                    "account": account["email"],
+                    "replies": 0, "auto_replies": 0,
+                    "unsubscribes": 0, "bounces": 0, "dnc_added": 0,
+                    "errors": ["Timeout after 30s"],
+                }
+
+        tasks = [_check_with_timeout(account) for account in self.accounts]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Aggregate results

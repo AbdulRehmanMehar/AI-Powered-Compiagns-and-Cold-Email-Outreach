@@ -6,6 +6,7 @@ Handles auto campaign creation, email sending, and follow-ups
 import schedule
 import time
 import json
+import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable
 import threading
@@ -17,7 +18,12 @@ from reply_detector import ReplyDetector
 from database import Campaign, Email, campaigns_collection
 import config
 
-
+# Optional warmup bidirectional module (only loaded if WARMUP_ACCOUNTS configured)
+try:
+    from warmup_bidirectional import run_bidirectional_warmup_cycle
+    WARMUP_AVAILABLE = config.WARMUP_ACCOUNTS and len(config.WARMUP_ACCOUNTS) > 0
+except ImportError:
+    WARMUP_AVAILABLE = False
 def get_target_time() -> datetime:
     """Get current time in target timezone (US Eastern)"""
     tz = pytz.timezone(config.TARGET_TIMEZONE)
@@ -405,6 +411,37 @@ class AutoScheduler:
         
         return True
     
+    def run_warmup_task(self):
+        """
+        Run bidirectional warmup cycle (non-blocking background task).
+        
+        Sends test emails to warmup accounts to build domain reputation.
+        Monitors for replies and auto-moves spam emails to inbox.
+        
+        Runs in background thread pool to avoid blocking main scheduler.
+        """
+        if not WARMUP_AVAILABLE:
+            return  # Silently skip if warmup not configured
+        
+        try:
+            print(f"\n[{get_target_time_str()}] 🔥 Warmup Bidirectional Cycle...")
+            
+            # Run async warmup in event loop (non-blocking)
+            loop = asyncio.new_event_loop()
+            result = loop.run_until_complete(run_bidirectional_warmup_cycle())
+            loop.close()
+            
+            # Log results
+            print(f"   ✅ Warmup sent: {result.get('sent', 0)}")
+            print(f"   📥 Replies: {result.get('replies', 0)}")
+            placement = result.get('placement', {})
+            inbox = placement.get('inbox', 0)
+            spam = placement.get('spam', 0)
+            print(f"   📬 Placement: {inbox} INBOX | {spam} SPAM")
+            
+        except Exception as e:
+            print(f"   ⚠️  Warmup cycle error: {e}")
+    
     def _run_missed_campaigns(self):
         """Run any campaigns that were scheduled earlier today but missed"""
         now = get_target_time()
@@ -483,6 +520,11 @@ class AutoScheduler:
         schedule.every(followup_check_interval_hours).hours.do(self.send_followups_task)
         schedule.every(initial_emails_interval_hours).hours.do(self.send_initial_emails_task)
         schedule.every().hour.do(self.check_system_health)  # Health monitoring every hour
+        
+        # Schedule warmup bidirectional task (3-4x daily if configured)
+        if WARMUP_AVAILABLE:
+            print(f"📌 Scheduling warmup bidirectional cycle every 4 hours")
+            schedule.every(4).hours.do(self.run_warmup_task)
         
         # Schedule campaign creation tasks
         # Note: schedule library uses server local time, so we convert from target TZ
@@ -691,7 +733,7 @@ if __name__ == "__main__":
         # RECOMMENDED: Load from MongoDB (fully autonomous)
         scheduler = create_scheduler_from_mongodb()
     
-    print(f"📧 Loaded {len(config.ZOHO_ACCOUNTS)} email account(s): {', '.join([a['email'] for a in config.ZOHO_ACCOUNTS])}")
+    print(f"📧 Loaded {len(config.PRODUCTION_ACCOUNTS)} email account(s) [{config.PRIMARY_SENDER_MODE}]: {', '.join([a['email'] for a in config.PRODUCTION_ACCOUNTS])}")
     
     # Start fully automatic - no manual intervention needed
     scheduler.start(

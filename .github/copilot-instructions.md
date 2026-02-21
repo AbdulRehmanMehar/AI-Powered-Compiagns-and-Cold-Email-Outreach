@@ -1,7 +1,7 @@
 # GitHub Copilot Instructions for Cold Email System
 
 ## Project Context
-This is an autonomous cold email outreach system using AI-powered email generation, RocketReach for lead discovery, and multi-account Zoho for sending. The system uses MongoDB for data persistence and follows expert cold email strategies.
+This is an autonomous cold email outreach system using AI-powered email generation, RocketReach for lead discovery, and multi-account sending (Zoho or Gmail via sender mode switching). The system uses MongoDB for data persistence and follows expert cold email strategies. Includes an automated bidirectional warmup system for building domain reputation.
 
 ## CRITICAL: System Architecture Rules
 
@@ -32,6 +32,50 @@ The system automatically skips leads that are:
 - Account for ~20-30% skip rate due to verification/DNC/bounces
 - If target is 300 emails/day, system needs to fetch 400+ leads to account for skips
 
+### Sender Mode & Account Routing
+**The system has two sender modes controlled by `PRIMARY_SENDER_MODE` env var:**
+
+- `zoho` (default): Uses `config.ZOHO_ACCOUNTS` (8 Zoho accounts), Zoho SMTP/IMAP
+- `warmup`: Uses `config.WARMUP_ACCOUNTS` (Gmail accounts), Gmail SMTP/IMAP
+
+**CRITICAL: Always use `config.PRODUCTION_ACCOUNTS` in pipeline code, NOT `config.ZOHO_ACCOUNTS`:**
+
+- ✅ `config.PRODUCTION_ACCOUNTS` — dynamically resolves based on sender mode
+- ✅ `config.PRODUCTION_SMTP_HOST` / `config.PRODUCTION_SMTP_PORT` — mode-aware
+- ✅ `config.PRODUCTION_IMAP_HOST` / `config.PRODUCTION_IMAP_PORT` — mode-aware
+- ❌ `config.ZOHO_ACCOUNTS` — only use when you explicitly need Zoho accounts (e.g., warmup_bidirectional.py which always sends FROM Zoho)
+
+**The campaign pipeline must NEVER be disabled regardless of sender mode.** All workers (IMAP, send, pre-generator, campaign scheduler) always launch.
+
+### Warmup System Architecture
+**Bidirectional warmup (`warmup_bidirectional.py`) builds domain reputation:**
+
+- Sends business-like emails FROM `config.ZOHO_ACCOUNTS` TO Gmail test accounts
+- Monitors test account inboxes via IMAP for incoming warmup emails
+- Generates contextual AI replies using Groq (llama-3.3-70b-versatile)
+- Auto-moves emails from spam → inbox to train spam filters
+- Runs every 4 hours as background task in `v2/scheduler.py`
+
+**Warmup uses separate collections — never mix with campaign data:**
+- `warmup_email_drafts` — pre-generated warmup templates (NOT `email_drafts`)
+- `warmup_threads` — conversation threading for warmup emails
+- Warmup `emails` records have `email_type: "warmup"` and NO `lead_id`
+
+**When querying emails collection, always filter appropriately:**
+- Campaign queries: add `"lead_id": {"$exists": True}` to exclude warmup records
+- Warmup queries: add `"email_type": "warmup"` filter
+
+### V2 Pipeline Architecture
+**The v2 async pipeline (`main_v2.py` → `v2/scheduler.py`) is the recommended entry point:**
+
+- `v2/scheduler.py` — Async orchestrator, launches all workers + warmup loop
+- `v2/pre_generator.py` — Draft pre-generation (lazy-loads EmailGenerator, CampaignManager)
+- `v2/send_worker.py` — Async SMTP sender using `config.PRODUCTION_ACCOUNTS`
+- `v2/imap_worker.py` — Async IMAP reply/bounce detection with per-account timeouts
+- `v2/account_pool.py` — Account rotation with reputation tracking
+
+**Non-blocking design:** IMAP startup has 60s overall timeout + 30s per-account timeout. If IMAP fails, system continues with other workers.
+
 ## Core Development Guidelines
 
 ### 1. Virtual Environment Management
@@ -39,17 +83,17 @@ The system automatically skips leads that are:
 
 ```bash
 # Before running ANY Python command:
-source venv/bin/activate  # macOS/Linux
+source .venv/bin/activate  # macOS/Linux
 # OR
-venv\Scripts\activate     # Windows
+.venv\Scripts\activate     # Windows
 
 # Then run your script:
 python script_name.py
 ```
 
 **When suggesting commands:**
-- ✅ Always prefix with `source venv/bin/activate &&`
-- ✅ Check if venv exists before running scripts
+- ✅ Always prefix with `source .venv/bin/activate &&`
+- ✅ Check if .venv exists before running scripts
 - ❌ Never run `python3` or `pip3` globally without venv activation
 
 ### 2. File Organization Rules
@@ -76,7 +120,7 @@ python script_name.py
 coldemails/
 ├── .github/
 │   └── copilot-instructions.md    # This file
-├── venv/                           # Virtual environment
+├── .venv/                          # Virtual environment
 ├── tests/                          # All test files
 │   ├── test_*.py
 │   ├── check_*.py
@@ -89,11 +133,20 @@ coldemails/
 ├── utils/                          # Utility scripts
 │   ├── migrations/
 │   └── fixes/
+├── v2/                             # Async v2 pipeline
+│   ├── scheduler.py
+│   ├── pre_generator.py
+│   ├── send_worker.py
+│   ├── imap_worker.py
+│   └── account_pool.py
 ├── data/                           # Data files
-├── main.py                         # Core application files
+├── main_v2.py                      # V2 entry point (recommended)
+├── main.py                         # CLI interface
 ├── campaign_manager.py
 ├── email_generator.py
-├── auto_scheduler.py
+├── warmup_bidirectional.py         # Warmup system
+├── auto_scheduler.py               # Legacy scheduler
+├── config.py                       # Config + PRODUCTION_ACCOUNTS routing
 └── README.md                       # Root readme only
 ```
 
@@ -148,7 +201,7 @@ print(f"Sent email to {email}")
 #### Before Starting Scheduler
 ```bash
 # 1. Activate venv
-source venv/bin/activate
+source .venv/bin/activate
 
 # 2. Check dependencies
 pip install -r requirements.txt
@@ -159,7 +212,10 @@ python -c "from database import db; db.command('ping')"
 # 4. Check API quotas
 python tests/check_groq_usage.py
 
-# 5. Start scheduler
+# 5. Start v2 pipeline (recommended)
+python main_v2.py
+
+# OR start legacy scheduler
 python auto_scheduler.py
 ```
 
@@ -209,7 +265,7 @@ python auto_scheduler.py
 
 ```bash
 # Setup
-source venv/bin/activate
+source .venv/bin/activate
 pip install -r requirements.txt
 
 # Testing
@@ -222,9 +278,10 @@ python tests/check_last_sends.py
 python tests/emergency_diagnostic.py
 
 # Operations
-python auto_scheduler.py                    # Start scheduler
-tail -f scheduler.log                       # Monitor logs
-ps aux | grep auto_scheduler                # Check if running
+python main_v2.py                            # Start v2 async pipeline (recommended)
+python auto_scheduler.py                     # Start legacy scheduler
+tail -f scheduler.log                        # Monitor logs
+ps aux | grep 'main_v2\|auto_scheduler'      # Check if running
 ```
 
 ## Emergency Procedures
@@ -234,21 +291,23 @@ ps aux | grep auto_scheduler                # Check if running
 2. Check logs: `tail -100 scheduler.log`
 3. Check API quota: `python tests/check_groq_usage.py`
 4. Check MongoDB: `python tests/emergency_diagnostic.py`
-5. Fix and restart: `python auto_scheduler.py`
+5. Fix and restart: `python main_v2.py`
 
 ### No Emails Sending?
 1. Verify leads exist: `python tests/check_last_sends.py`
 2. Check API quota exhaustion
 3. Check for code errors in logs
-4. Verify Zoho credentials
+4. Verify sender credentials (Zoho or Gmail app passwords)
 5. Check email account daily limits
+6. Check PRIMARY_SENDER_MODE matches intended accounts
 
 ## AI Model Context
 
-- **Email Generator:** Uses Groq (llama-3.3-70b-versatile, groq/compound chain)
+- **Campaign Email Generator:** Uses Ollama (qwen2.5:7b) or Groq (llama-3.3-70b-versatile) via LLM_PROVIDER env
 - **Email Reviewer:** Validates quality before sending (score ≥ 70)
 - **Lead Enricher:** Crawls company websites for personalization
 - **ICP Classifier:** TK Kader framework for lead qualification
+- **Warmup Templates/Replies:** Uses Groq explicitly (llama-3.3-70b-versatile) — not LLM_PROVIDER
 
 ## Contact & Support
 

@@ -197,8 +197,8 @@ class AccountReputation:
     @staticmethod
     def refresh_all():
         """Recompute and save reputation for all accounts."""
-        logger.info(f"reputation_refresh_start: {len(config.ZOHO_ACCOUNTS)} accounts")
-        for acct in config.ZOHO_ACCOUNTS:
+        logger.info(f"reputation_refresh_start: {len(config.PRODUCTION_ACCOUNTS)} accounts")
+        for acct in config.PRODUCTION_ACCOUNTS:
             email = acct["email"]
             data = AccountReputation.compute_score(email)
             AccountReputation.save_score(email, data)
@@ -260,7 +260,7 @@ class AccountPool:
     """
 
     def __init__(self):
-        self.accounts: List[Dict[str, str]] = config.ZOHO_ACCOUNTS
+        self.accounts: List[Dict[str, str]] = config.PRODUCTION_ACCOUNTS
         self._locks: Dict[str, asyncio.Lock] = {}
         self.target_tz = pytz.timezone(config.TARGET_TIMEZONE)
 

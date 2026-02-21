@@ -74,6 +74,62 @@ MAX_EMAILS_PER_RECIPIENT_DOMAIN = int(os.getenv("MAX_EMAILS_PER_RECIPIENT_DOMAIN
 ZOHO_EMAIL = ZOHO_ACCOUNTS[0]["email"] if ZOHO_ACCOUNTS else ""
 ZOHO_PASSWORD = ZOHO_ACCOUNTS[0]["password"] if ZOHO_ACCOUNTS else ""
 
+# Warmup Bidirectional Email Accounts (Gmail, Outlook, etc. with app passwords)
+def parse_warmup_accounts() -> List[Dict[str, str]]:
+    """Parse warmup test email accounts with app passwords for IMAP/SMTP.
+    
+    Returns accounts with same schema as Zoho accounts:
+    {email, password, sender_name, app_password}
+    so they're interchangeable in the v2 pipeline.
+    """
+    emails = os.getenv("WARMUP_EMAILS", "").split(",")
+    passwords = os.getenv("WARMUP_EMAILS_APP_PASSWORDS", "").split(",")
+    
+    accounts = []
+    for i, email in enumerate(emails):
+        email = email.strip()
+        if email:
+            app_pw = passwords[i].strip() if i < len(passwords) else ""
+            accounts.append({
+                "email": email,
+                "password": app_pw,          # Normalized: same key as Zoho accounts
+                "app_password": app_pw,      # Keep for warmup_bidirectional.py compat
+                "sender_name": "Abdul",
+            })
+    return accounts
+
+WARMUP_ACCOUNTS = parse_warmup_accounts()
+
+# Production Sender Mode - Switch between Zoho and Warmup accounts
+PRIMARY_SENDER_MODE = os.getenv("PRIMARY_SENDER_MODE", "zoho").lower()  # "zoho" or "warmup"
+
+# PRODUCTION_ACCOUNTS: Dynamic selection based on PRIMARY_SENDER_MODE
+if PRIMARY_SENDER_MODE == "warmup":
+    # Use warmup accounts for production (testing/reputation building phase)
+    PRODUCTION_ACCOUNTS = WARMUP_ACCOUNTS
+    PRODUCTION_SMTP_HOST = "smtp.gmail.com"  # Gmail is primary warmup provider
+    PRODUCTION_SMTP_PORT = 587
+    PRODUCTION_IMAP_HOST = "imap.gmail.com"
+    PRODUCTION_IMAP_PORT = 993
+else:
+    # Default: Use Zoho accounts for production (normal operation)
+    PRODUCTION_ACCOUNTS = ZOHO_ACCOUNTS
+    PRODUCTION_SMTP_HOST = ZOHO_SMTP_HOST
+    PRODUCTION_SMTP_PORT = ZOHO_SMTP_PORT
+    PRODUCTION_IMAP_HOST = ZOHO_IMAP_HOST
+    PRODUCTION_IMAP_PORT = ZOHO_IMAP_PORT
+
+# Gmail / Outlook IMAP/SMTP Settings
+GMAIL_SMTP_HOST = "smtp.gmail.com"
+GMAIL_SMTP_PORT = 587
+GMAIL_IMAP_HOST = "imap.gmail.com"
+GMAIL_IMAP_PORT = 993
+
+OUTLOOK_SMTP_HOST = "smtp.office365.com"
+OUTLOOK_SMTP_PORT = 587
+OUTLOOK_IMAP_HOST = "imap-mail.outlook.com"  # Office365/2FA-enabled accounts only
+OUTLOOK_IMAP_PORT = 993
+
 # Email Settings
 FROM_NAME = os.getenv("FROM_NAME", "PrimeStrides Team")
 REPLY_TO = os.getenv("REPLY_TO", ZOHO_EMAIL)

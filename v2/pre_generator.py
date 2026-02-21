@@ -13,6 +13,7 @@ handles pacing independently.
 
 import asyncio
 import logging
+import os
 import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set
@@ -43,7 +44,7 @@ FETCH_AMOUNT               = 200    # leads to request per replenishment call
 MIN_FETCH_INTERVAL_SECS    = 7_200  # 2 h cooldown per campaign between RocketReach calls
 REPLENISH_CHECK_INTERVAL   = 300    # only scan campaigns every 5 min
 DRAFT_ACTIVATION_INTERVAL  = 1_800  # only scan for new draft campaigns every 30 min
-MAX_REPLENISH_PER_CYCLE    = 3      # cap RocketReach fetches per cycle to prevent blocking
+MAX_REPLENISH_PER_CYCLE    = int(os.getenv("MAX_REPLENISH_PER_CYCLE", "3"))  # configurable via env (default: warmup mode)
 
 # ── EmailDraft collection ────────────────────────────────────────────
 email_drafts_collection = db["email_drafts"]
