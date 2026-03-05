@@ -54,13 +54,13 @@ def main():
         except ImportError:
             print("⚠️  aiohttp not installed (alerts will be disabled)")
 
-        print(f"✅ {len(config.PRODUCTION_ACCOUNTS)} production accounts loaded ({config.PRIMARY_SENDER_MODE} mode)")
+        print(f"✅ {len(config.ZOHO_ACCOUNTS)} email accounts loaded")
         print(f"✅ LLM provider: {config.LLM_PROVIDER}")
         print()
 
         # ── Feasibility check for GLOBAL_DAILY_TARGET ──
         if config.GLOBAL_DAILY_TARGET > 0:
-            n_accounts = len(config.PRODUCTION_ACCOUNTS)
+            n_accounts = len(config.ZOHO_ACCOUNTS)
             target = config.GLOBAL_DAILY_TARGET
             per_account_target = -(-target // n_accounts)  # ceil division
             window_hours = config.SENDING_HOUR_END - config.SENDING_HOUR_START

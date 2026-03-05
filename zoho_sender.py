@@ -14,9 +14,9 @@ class ZohoEmailSender:
     """Send emails through multiple Zoho SMTP accounts with rotation, warm-up, and limits"""
     
     def __init__(self):
-        self.smtp_host = config.PRODUCTION_SMTP_HOST
-        self.smtp_port = config.PRODUCTION_SMTP_PORT
-        self.accounts = config.PRODUCTION_ACCOUNTS
+        self.smtp_host = config.ZOHO_SMTP_HOST
+        self.smtp_port = config.ZOHO_SMTP_PORT
+        self.accounts = config.ZOHO_ACCOUNTS
         self.rotation_strategy = config.EMAIL_ROTATION_STRATEGY
         self.emails_per_account = config.EMAILS_PER_ACCOUNT
         self.reply_to = config.REPLY_TO
@@ -49,10 +49,9 @@ class ZohoEmailSender:
         BlockedAccounts.cleanup_expired()  # Clear expired blocks on startup
         
         if not self.accounts:
-            raise ValueError("No email accounts configured. Check ZOHO_EMAILS / WARMUP_EMAILS in .env")
+            raise ValueError("No Zoho email accounts configured. Check ZOHO_EMAILS in .env")
         
-        mode = config.PRIMARY_SENDER_MODE
-        print(f"📧 Loaded {len(self.accounts)} email account(s) [{mode}]: {', '.join(a['email'] for a in self.accounts)}")
+        print(f"📧 Loaded {len(self.accounts)} email account(s): {', '.join(a['email'] for a in self.accounts)}")
         print(f"   ⏰ Sending hours: {self.send_hour_start}:00 - {self.send_hour_end}:00")
         print(f"   🔥 Warm-up: {'enabled' if self.warmup_enabled else 'disabled'}")
     

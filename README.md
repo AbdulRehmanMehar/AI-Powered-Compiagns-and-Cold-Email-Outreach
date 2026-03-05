@@ -26,8 +26,7 @@ A **fully autonomous** cold email outreach system that requires **ZERO human inp
 - 🔍 **RocketReach Integration**: Automatic lead sourcing based on ICP criteria
 - ✍️ **LeadGenJay Emails**: 4-line framework, under 75 words, question-based pain points
 - ✅ **Quality Gate**: AI reviewer scores emails before sending
-- 📧 **Multi-Account Sending**: Rotates across Zoho or Gmail accounts (mode-switchable)
-- 🔥 **Domain Warmup**: Bidirectional warmup system builds sender reputation automatically
+- 📧 **Multi-Account Zoho**: Rotates across 8 email accounts for deliverability
 - 🔄 **Smart Follow-ups**: Day 3 (same thread) + Day 6 (new thread, different angle)
 - 🧵 **Email Threading**: Proper Message-ID/In-Reply-To headers for thread grouping
 - 🛡️ **Global Deduplication**: Never emails same person twice across ANY campaign
@@ -39,32 +38,24 @@ A **fully autonomous** cold email outreach system that requires **ZERO human inp
 
 ## Quick Start
 
-### Option 1: V2 Async Pipeline (Recommended)
+### Option 1: Fully Autonomous (Recommended)
 
 ```bash
 # 1. Configure environment
 cp .env.example .env
 # Edit .env with your credentials
 
-# 2. Start the v2 async system
-python main_v2.py
-```
-
-### Option 2: Legacy Scheduler
-
-```bash
-# Start the legacy synchronous scheduler
+# 2. Start the system - it handles everything else
 python auto_scheduler.py
 ```
 
-The system will:
+That's it! The system will:
 - Initialize default config in MongoDB
 - Select best ICP based on performance data
 - Create campaigns automatically
 - Fetch leads from RocketReach
 - Generate and send emails
 - Track results and learn
-- Run warmup cycles (if configured)
 
 ### Option 2: Docker Deployment
 
@@ -498,65 +489,6 @@ Each template includes:
 
 ---
 
-## 🔥 Domain Warmup System
-
-New domains lack sender reputation and emails may land in spam. The system includes an automated **bidirectional warmup** to build domain reputation before scaling outreach.
-
-### How It Works
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    BIDIRECTIONAL WARMUP FLOW                                 │
-│                                                                              │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
-│  │ 1. SEND     │───►│ 2. MONITOR  │───►│ 3. REPLY    │───►│ 4. RESCUE   │  │
-│  │ Zoho → Test │    │ IMAP inbox  │    │ via Groq AI │    │ Spam→Inbox  │  │
-│  │             │    │             │    │             │    │             │  │
-│  │ Real-looking│    │ Gmail/IMAP  │    │ Contextual  │    │ Auto-move   │  │
-│  │ business    │    │ check for   │    │ replies to  │    │ from spam   │  │
-│  │ emails      │    │ warmup msgs │    │ warm emails │    │ to inbox    │  │
-│  └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘  │
-│                                                                              │
-│  Test Accounts: Gmail addresses with app passwords (receive warmup emails)   │
-│  Sender Accounts: Zoho production accounts (always send FROM Zoho)           │
-│  Schedule: Runs every 4 hours as background task in v2 scheduler             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Sender Mode Switching
-
-The system supports two modes via the `PRIMARY_SENDER_MODE` environment variable:
-
-| Mode | `PRIMARY_SENDER_MODE` | Accounts Used | SMTP/IMAP Host |
-|------|----------------------|---------------|----------------|
-| **Zoho** (default) | `zoho` | `ZOHO_ACCOUNTS` (8 accounts) | smtppro.zoho.com / imappro.zoho.com |
-| **Warmup** | `warmup` | `WARMUP_ACCOUNTS` (Gmail) | smtp.gmail.com / imap.gmail.com |
-
-In **warmup mode**, the campaign pipeline continues running normally — it just routes through Gmail warmup accounts instead of Zoho. The warmup bidirectional system always sends FROM Zoho accounts TO test accounts regardless of mode.
-
-> **CRITICAL**: The campaign pipeline (IMAP worker, send worker, pre-generator, campaign scheduler) is NEVER disabled regardless of sender mode. All workers always launch.
-
-### Warmup Environment Variables
-
-```env
-# Test accounts that receive warmup emails (Gmail with app passwords)
-WARMUP_EMAILS=account1@gmail.com,account2@gmail.com
-WARMUP_EMAILS_APP_PASSWORDS=app_pw_1,app_pw_2
-
-# Switch production sending to warmup accounts
-PRIMARY_SENDER_MODE=warmup   # "zoho" (default) or "warmup"
-```
-
-### Warmup MongoDB Collections
-
-| Collection | Purpose |
-|-----------|---------|
-| `warmup_email_drafts` | Pre-generated warmup email templates (separate from campaign drafts) |
-| `warmup_threads` | Tracks warmup conversation threads for threading/replies |
-| `emails` | Warmup sends are recorded here with `email_type: "warmup"` (no `lead_id`) |
-
----
-
 ## Configuration
 
 ### Environment Variables (.env)
@@ -565,23 +497,14 @@ PRIMARY_SENDER_MODE=warmup   # "zoho" (default) or "warmup"
 # MongoDB
 DATABASE_URL=mongodb://localhost:27017/primeoutreachcron
 
-# LLM Provider
-LLM_PROVIDER=ollama                        # "ollama" or "groq"
-OLLAMA_API_BASE=http://192.168.1.9:11434   # Ollama server (for campaigns)
-GROQ_API_KEY=your_key                       # Groq API key (for warmup + fallback)
+# Groq LLM
+GROQ_API_KEY=your_key
 
 # RocketReach
 ROCKETREACH_API_KEY=your_key
 
-# Zoho (multiple accounts - production senders)
+# Zoho (multiple accounts)
 ZOHO_ACCOUNTS=[{"email":"a@co.com","password":"xxx"},{"email":"b@co.com","password":"xxx"}]
-
-# Warmup (Gmail test accounts)
-WARMUP_EMAILS=test1@gmail.com,test2@gmail.com
-WARMUP_EMAILS_APP_PASSWORDS=app_pw1,app_pw2
-
-# Sender Mode
-PRIMARY_SENDER_MODE=zoho                    # "zoho" or "warmup"
 
 # Verification
 VERIFY_EMAILS=true
@@ -877,27 +800,22 @@ The system guarantees you **never email the same person twice**:
 
 ```
 coldemails/
-├── auto_scheduler.py            # Legacy entry - fully autonomous scheduler (MongoDB config)
-├── main_v2.py                   # V2 entry - async pipeline with all workers
+├── auto_scheduler.py            # Main entry - fully autonomous scheduler (MongoDB config)
 ├── campaign_manager.py          # Campaign orchestration + autonomous pipeline
 ├── icp_manager.py               # ICP selection, analytics, TK Kader framework
-├── email_generator.py           # AI email generation (Ollama/Groq + fallback chain)
+├── email_generator.py           # AI email generation (Groq + fallback chain)
 ├── email_reviewer.py            # Self-improving AI review system
 ├── email_verifier.py            # Multi-layer email verification
-├── warmup_bidirectional.py      # 🔥 Bidirectional warmup (Zoho → Gmail test accounts)
 ├── primestrides_context.py      # Case studies, ICP templates, company context
 ├── rocketreach_client.py        # Lead discovery + deduplication
-├── zoho_sender.py               # Legacy multi-account email sending (mode-aware)
+├── zoho_sender.py               # Multi-account email sending
 ├── reply_detector.py            # IMAP reply checking
 ├── database.py                  # MongoDB models + SchedulerConfig + SearchOffsetTracker
-├── config.py                    # Environment config + PRODUCTION_ACCOUNTS routing
+├── config.py                    # Environment config
 ├── main.py                      # CLI interface
-├── v2/                          # Async v2 pipeline
-│   ├── scheduler.py             # Async orchestrator (all workers + warmup loop)
-│   ├── pre_generator.py         # Draft pre-generation pipeline
-│   ├── send_worker.py           # Async SMTP sender (uses PRODUCTION_ACCOUNTS)
-│   ├── imap_worker.py           # Async IMAP reply/bounce detection
-│   └── account_pool.py          # Account rotation + reputation tracking
+├── check_groq_usage.py          # Check LLM usage stats
+├── scheduler_config.json        # Legacy: JSON config (use --legacy flag)
+├── scheduler_config.example.json # Template for legacy mode
 ├── utils/                       # Utility modules
 │   ├── __init__.py
 │   └── logging_utils.py         # Logging + retry decorators
