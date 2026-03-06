@@ -24,7 +24,7 @@ from datetime import datetime
 
 from campaign_manager import CampaignManager
 from rocketreach_client import RocketReachClient
-from zoho_sender import ZohoEmailSender
+from smtp2go_sender import SMTP2GOEmailSender as ZohoEmailSender  # SMTP2GO replacement
 from email_generator import EmailGenerator
 from database import Campaign, Lead, Email
 

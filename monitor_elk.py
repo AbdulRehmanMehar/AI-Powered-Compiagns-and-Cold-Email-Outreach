@@ -53,9 +53,9 @@ def show_daily_stats():
         print(f"  Conversion rate: {conversion}%")
     
     # Account usage
-    print(f"\n📮 Per-Account Usage:")
-    from config import ZOHO_ACCOUNTS
-    for account in ZOHO_ACCOUNTS:
+    print(f"\n📮 Per-Account Usage (SMTP2GO):")
+    from config import SMTP2GO_ACCOUNTS
+    for account in SMTP2GO_ACCOUNTS:
         email = account['email']
         sent_today = SendingStats.get_sends_today(email)
         daily_limit = 12  # Week 3 warmup

@@ -1,16 +1,16 @@
 """
 Async Send Worker — Pulls ready-to-send drafts and delivers via aiosmtplib.
 
-Produces identical email format to zoho_sender.py:
+Produces identical email format to smtp2go_sender.py:
 - Same MIMEMultipart structure
 - Same Message-ID format (make_msgid with sender domain)
 - Same In-Reply-To / References threading headers
 - Same text_to_html conversion
-- Same error handling (554 → block account)
+- Same error handling (550/554 → block account)
 
 Key design:
 - One SMTP connection per account at a time (enforced by AccountPool locks)
-- Fresh connection per send (Zoho drops idle connections)
+- Fresh connection per send (SMTP2GO may drop idle connections after ~60s)
 - Records send stats + cooldown after each send
 - Graceful shutdown: finishes in-flight send, releases claimed drafts
 """
@@ -48,7 +48,7 @@ logger = logging.getLogger("coldemails.send_worker")
 def text_to_html(text: str) -> str:
     """
     Convert plain text email to basic HTML.
-    Identical to zoho_sender.text_to_html for consistency.
+    Identical to smtp2go_sender.text_to_html for consistency.
     """
     html = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     html = html.replace("\n\n", "</p><p>").replace("\n", "<br>")
@@ -78,8 +78,8 @@ class SendWorker:
 
     def __init__(self, account_pool: AccountPool):
         self.pool = account_pool
-        self.smtp_host = config.ZOHO_SMTP_HOST
-        self.smtp_port = config.ZOHO_SMTP_PORT
+        self.smtp_host = config.SMTP2GO_SMTP_HOST
+        self.smtp_port = config.SMTP2GO_SMTP_PORT
         self._shutdown = asyncio.Event()
         self._in_flight_draft_id: Optional[str] = None
 
@@ -265,8 +265,10 @@ class SendWorker:
                 else:
                     error = result.get("error", "Unknown error")
 
-                    # Check for 554 (account blocked by Zoho)
-                    if result.get("error_code") == 554 or "554" in str(error):
+                    # Check for 550/554 (account blocked / invalid — permanent failure)
+                    if result.get("error_code") in (550, 554) or any(
+                        c in str(error) for c in ("550", "554")
+                    ):
                         self.pool.mark_blocked(from_email, error)
 
                     EmailDraft.mark_failed(draft_id, error)
@@ -298,14 +300,14 @@ class SendWorker:
         references: List[str] = None,
     ) -> dict:
         """
-        Send one email via aiosmtplib.
-        Produces identical output to zoho_sender.send_email().
-        """
+    Send one email via aiosmtplib through SMTP2GO.
+    Produces identical output to smtp2go_sender.send_email().
+    """
         from_email = account["email"]
         from_name = account["sender_name"]
 
         try:
-            # Build MIME message (identical to zoho_sender.py)
+            # Build MIME message (identical to smtp2go_sender.py)
             if html_body:
                 msg = MIMEMultipart("alternative")
                 msg.attach(MIMEText(body, "plain"))
@@ -317,7 +319,7 @@ class SendWorker:
                 msg.attach(MIMEText(body, "plain"))
                 msg.attach(MIMEText(auto_html, "html"))
 
-            # Generate Message-ID (same format as zoho_sender)
+            # Generate Message-ID (same format as smtp2go_sender)
             domain = from_email.split("@")[1] if "@" in from_email else "primestrides.com"
             message_id = make_msgid(domain=domain)
             msg["Message-ID"] = message_id

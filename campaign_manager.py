@@ -13,7 +13,7 @@ _email_drafts_collection = db["email_drafts"]
 from email_generator import EmailGenerator
 from email_reviewer import EmailReviewer, ReviewStatus, format_review_report
 from email_verifier import EmailVerifier, VerificationStatus
-from zoho_sender import ZohoEmailSender, text_to_html
+from smtp2go_sender import SMTP2GOEmailSender as EmailSender, text_to_html
 from lead_enricher import enrich_lead_sync, get_enrichment_for_email
 import config
 
@@ -46,7 +46,7 @@ class CampaignManager:
     def __init__(self, enable_review: bool = True, max_rewrites: int = 2):
         self.rocketreach = RocketReachClient()
         self.email_generator = EmailGenerator()
-        self.email_sender = ZohoEmailSender()
+        self.email_sender = EmailSender()
         self.email_reviewer = EmailReviewer() if enable_review else None
         self.enable_review = enable_review
         self.max_rewrites = max_rewrites
@@ -942,10 +942,10 @@ class CampaignManager:
                             Email.mark_failed(email_id, result.get("error", "Unknown error"))
                             results["failed"] += 1
                             
-                            # If Zoho flagged recipient as invalid (554 error), mark lead
+                            # If SMTP provider flagged recipient as invalid (550/554 error), mark lead
                             if result.get("recipient_invalid"):
-                                Lead.mark_invalid_email(lead_id, f"Zoho blocked: {result.get('error', 'Invalid recipient')}")
-                                print(f"   ⚠️ Marked {lead_email} as invalid - Zoho blocked send")
+                                Lead.mark_invalid_email(lead_id, f"SMTP blocked: {result.get('error', 'Invalid recipient')}")
+                                print(f"   ⚠️ Marked {lead_email} as invalid - SMTP blocked send")
                             
                             results["details"].append({
                                 "lead_email": lead["email"],

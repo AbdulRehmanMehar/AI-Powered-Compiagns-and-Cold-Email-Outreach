@@ -29,8 +29,8 @@ if config.GLOBAL_DAILY_TARGET == 0:
     issues.append('GLOBAL_DAILY_TARGET is 0 (set to 300 for deployment)')
 if not config.DATABASE_URL:
     issues.append('DATABASE_URL not set')
-if not config.ZOHO_ACCOUNTS:
-    issues.append('No Zoho accounts configured')
+if not config.SMTP2GO_ACCOUNTS:
+    issues.append('No SMTP2GO accounts configured (check SMTP2GO_ACCOUNTS in .env)')
 
 if issues:
     print('   ⚠️  Configuration issues:')

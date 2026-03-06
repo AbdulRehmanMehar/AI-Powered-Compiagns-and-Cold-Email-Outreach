@@ -1,11 +1,13 @@
 """
 Reply Detection System
-Checks Zoho inbox for replies and updates lead status
+Checks the shared Gmail IMAP inbox for replies and updates lead status.
 
-NOTE: Requires IMAP to be enabled in Zoho Mail settings:
-1. Go to Zoho Mail → Settings → Mail Accounts
-2. Select your account → IMAP Access
-3. Toggle IMAP Access to ON
+SMTP2GO migration: All sending accounts share a single Reply-To Gmail inbox.
+All reply/bounce detection is done against that one inbox instead of
+checking each sending account individually.
+
+NOTE: Requires Gmail "App Password" (not your regular password).
+  Google Account → Security → 2-Step Verification → App Passwords
 """
 
 import imaplib
@@ -69,14 +71,24 @@ UNSUBSCRIBE_PATTERNS = [
 
 
 class ReplyDetector:
-    """Detect replies in Zoho inbox and update campaign status"""
-    
+    """Detect replies in Gmail IMAP inbox and update campaign status.
+
+    All SMTP2GO sending accounts use a shared Gmail inbox as Reply-To so
+    replies arrive in one place. We check only that single Gmail account.
+    """
+
     def __init__(self):
-        self.accounts = config.ZOHO_ACCOUNTS
-        self.imap_host = config.ZOHO_IMAP_HOST
-        self.imap_port = config.ZOHO_IMAP_PORT
+        # Single shared Gmail inbox (Reply-To for all SMTP2GO senders)
+        self.gmail_account = {
+            "email": config.GMAIL_IMAP_ACCOUNT,
+            "password": config.GMAIL_IMAP_APP_PASSWORD,
+        }
+        # Expose as a list so existing loop code works unchanged
+        self.accounts = [self.gmail_account] if config.GMAIL_IMAP_ACCOUNT else []
+        self.imap_host = config.GMAIL_IMAP_HOST
+        self.imap_port = config.GMAIL_IMAP_PORT
         self._connections: Dict[str, imaplib.IMAP4_SSL] = {}
-        self._failed_accounts: Set[str] = set()  # Track accounts that failed to connect
+        self._failed_accounts: Set[str] = set()
     
     def _is_auto_reply(self, subject: str, body: str) -> Tuple[bool, bool]:
         """
@@ -150,7 +162,7 @@ class ReplyDetector:
             mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=30)
             mail.login(email_addr, account["password"])
             self._connections[email_addr] = mail
-            print(f"   ✅ Connected to inbox: {email_addr}")
+            print(f"   ✅ Connected to Gmail inbox: {email_addr}")
             return mail
         except (TimeoutError, OSError) as e:
             print(f"   ⏱️  {email_addr}: Connection timeout ({e})")
@@ -158,8 +170,8 @@ class ReplyDetector:
             return None
         except imaplib.IMAP4.error as e:
             error_msg = str(e)
-            if "IMAP" in error_msg.upper():
-                print(f"   ⚠️  {email_addr}: IMAP not enabled (enable in Zoho Mail Settings → IMAP Access)")
+            if "AUTHENTICATE" in error_msg.upper() or "LOGIN" in error_msg.upper():
+                print(f"   ⚠️  {email_addr}: Gmail auth failed — check GMAIL_IMAP_APP_PASSWORD in .env")
             else:
                 print(f"   ❌ {email_addr}: {e}")
             self._failed_accounts.add(email_addr)
@@ -212,13 +224,18 @@ class ReplyDetector:
     def _get_sent_email_addresses(self) -> Set[str]:
         """Get all email addresses we've sent to"""
         sent_emails = emails_collection.find(
-            {"status": {"$in": [Email.STATUS_SENT, Email.STATUS_OPENED]}},
+            {
+                "status": {"$in": [Email.STATUS_SENT, Email.STATUS_OPENED]},
+                "lead_id": {"$exists": True},
+            },
             {"lead_id": 1}
         )
-        
-        lead_ids = [e["lead_id"] for e in sent_emails]
+
+        lead_ids = [e["lead_id"] for e in sent_emails if e.get("lead_id") is not None]
+        if not lead_ids:
+            return set()
         leads = leads_collection.find({"_id": {"$in": lead_ids}}, {"email": 1})
-        
+
         return {lead["email"].lower() for lead in leads if lead.get("email")}
     
     def check_replies(self, 

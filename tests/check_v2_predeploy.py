@@ -89,20 +89,20 @@ try:
     else:
         fail("DATABASE_URL not set")
 
-    if config.ZOHO_ACCOUNTS and len(config.ZOHO_ACCOUNTS) > 0:
-        ok(f"{len(config.ZOHO_ACCOUNTS)} Zoho accounts loaded")
+    if config.SMTP2GO_ACCOUNTS and len(config.SMTP2GO_ACCOUNTS) > 0:
+        ok(f"{len(config.SMTP2GO_ACCOUNTS)} SMTP2GO accounts loaded")
     else:
-        fail("No Zoho accounts configured")
+        fail("No SMTP2GO accounts configured (check SMTP2GO_ACCOUNTS in .env)")
 
-    if config.ZOHO_SMTP_HOST:
-        ok(f"SMTP host: {config.ZOHO_SMTP_HOST}:{config.ZOHO_SMTP_PORT}")
+    if config.SMTP2GO_SMTP_HOST:
+        ok(f"SMTP host: {config.SMTP2GO_SMTP_HOST}:{config.SMTP2GO_SMTP_PORT}")
     else:
-        fail("ZOHO_SMTP_HOST not set")
+        fail("SMTP2GO_SMTP_HOST not set")
 
-    if config.ZOHO_IMAP_HOST:
-        ok(f"IMAP host: {config.ZOHO_IMAP_HOST}:{config.ZOHO_IMAP_PORT}")
+    if config.GMAIL_IMAP_HOST and config.GMAIL_IMAP_ACCOUNT:
+        ok(f"Gmail IMAP: {config.GMAIL_IMAP_ACCOUNT} @ {config.GMAIL_IMAP_HOST}:{config.GMAIL_IMAP_PORT}")
     else:
-        fail("ZOHO_IMAP_HOST not set")
+        fail("Gmail IMAP not configured (check GMAIL_IMAP_ACCOUNT / GMAIL_IMAP_APP_PASSWORD)")
 
     ok(f"LLM provider: {config.LLM_PROVIDER}")
     ok(f"Timezone: {config.TARGET_TIMEZONE}")

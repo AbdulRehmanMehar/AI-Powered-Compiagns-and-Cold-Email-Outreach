@@ -691,7 +691,7 @@ if __name__ == "__main__":
         # RECOMMENDED: Load from MongoDB (fully autonomous)
         scheduler = create_scheduler_from_mongodb()
     
-    print(f"📧 Loaded {len(config.ZOHO_ACCOUNTS)} email account(s): {', '.join([a['email'] for a in config.ZOHO_ACCOUNTS])}")
+    print(f"📧 SMTP2GO accounts: {len(config.SMTP2GO_ACCOUNTS)} loaded: {', '.join([a['email'] for a in config.SMTP2GO_ACCOUNTS])}")
     
     # Start fully automatic - no manual intervention needed
     scheduler.start(

@@ -131,13 +131,14 @@ class AsyncScheduler:
         logger.info("Cold Email System v2 — Starting")
         logger.info("=" * 60)
         logger.info(f"Timezone: {config.TARGET_TIMEZONE}")
-        logger.info(f"Accounts: {len(config.ZOHO_ACCOUNTS)}")
+        logger.info(f"SMTP Provider: SMTP2GO ({len(config.SMTP2GO_ACCOUNTS)} accounts)")
         logger.info(f"Sending hours: {config.SENDING_HOUR_START}:00 - {config.SENDING_HOUR_END}:00")
         logger.info(f"Hard cap/mailbox: {config.EMAILS_PER_DAY_PER_MAILBOX}")
         logger.info(f"Warmup: {'ON (week4+ cap=' + str(config.WARMUP_WEEK4_LIMIT) + ')' if config.WARMUP_ENABLED else 'OFF'}")
         logger.info(f"Cooldown: {config.MIN_DELAY_BETWEEN_EMAILS}-{config.MAX_DELAY_BETWEEN_EMAILS} min base")
         if config.GLOBAL_DAILY_TARGET > 0:
-            logger.info(f"Global target: {config.GLOBAL_DAILY_TARGET}/day → ~{-(-config.GLOBAL_DAILY_TARGET // len(config.ZOHO_ACCOUNTS))}/account")
+            n_accts = len(config.SMTP2GO_ACCOUNTS) or 1
+            logger.info(f"Global target: {config.GLOBAL_DAILY_TARGET}/day → ~{-(-config.GLOBAL_DAILY_TARGET // n_accts)}/account")
 
         # Register signal handlers
         loop = asyncio.get_event_loop()

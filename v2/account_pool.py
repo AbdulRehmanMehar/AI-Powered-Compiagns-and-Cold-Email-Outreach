@@ -196,9 +196,9 @@ class AccountReputation:
 
     @staticmethod
     def refresh_all():
-        """Recompute and save reputation for all accounts."""
-        logger.info(f"reputation_refresh_start: {len(config.ZOHO_ACCOUNTS)} accounts")
-        for acct in config.ZOHO_ACCOUNTS:
+        """Recompute and save reputation for all SMTP2GO accounts."""
+        logger.info(f"reputation_refresh_start: {len(config.SMTP2GO_ACCOUNTS)} accounts")
+        for acct in config.SMTP2GO_ACCOUNTS:
             email = acct["email"]
             data = AccountReputation.compute_score(email)
             AccountReputation.save_score(email, data)
@@ -249,7 +249,7 @@ class WarmDown:
 
 class AccountPool:
     """
-    Async-safe pool of Zoho email accounts.
+    Async-safe pool of SMTP2GO email accounts.
 
     Features:
     - Per-account asyncio.Lock (prevents concurrent SMTP on same account)
@@ -260,7 +260,7 @@ class AccountPool:
     """
 
     def __init__(self):
-        self.accounts: List[Dict[str, str]] = config.ZOHO_ACCOUNTS
+        self.accounts: List[Dict[str, str]] = config.SMTP2GO_ACCOUNTS
         self._locks: Dict[str, asyncio.Lock] = {}
         self.target_tz = pytz.timezone(config.TARGET_TIMEZONE)
 
@@ -290,14 +290,12 @@ class AccountPool:
 
         The final limit is also hard-capped at 500 (Zoho's absolute max).
         """
-        ZOHO_HARD_CAP = 500
+        SMTP2GO_DAILY_HARD_CAP = 1000  # Adjust to your SMTP2GO plan allowance
 
         # Check warm-down first (recently unblocked accounts)
         wd_limit = WarmDown.get_warmdown_limit(account_email)
         if wd_limit is not None:
             return wd_limit
-
-        # Warmup limit (for young accounts)
         warmup_limit = None
         if config.WARMUP_ENABLED:
             age_days = SendingStats.get_account_age_days(account_email)
@@ -333,8 +331,8 @@ class AccountPool:
             if warmup_limit is not None:
                 limit = min(limit, warmup_limit)
 
-            # Never exceed Zoho's hard cap
-            final = min(limit, ZOHO_HARD_CAP)
+            # Never exceed SMTP2GO plan daily hard cap
+            final = min(limit, SMTP2GO_DAILY_HARD_CAP)
 
             logger.debug(
                 "daily_limit_calculated",
@@ -355,7 +353,7 @@ class AccountPool:
         else:
             final = config.EMAILS_PER_DAY_PER_MAILBOX
 
-        final = min(final, ZOHO_HARD_CAP)
+        final = min(final, SMTP2GO_DAILY_HARD_CAP)
         logger.debug(
             "daily_limit_calculated",
             extra={"account": account_email, "warmup_limit": warmup_limit, "final": final},

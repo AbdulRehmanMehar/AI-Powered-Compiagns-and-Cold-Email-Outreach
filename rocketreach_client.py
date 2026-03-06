@@ -342,21 +342,39 @@ class RocketReachClient:
         if name:
             query_params["name"] = [name]
         if current_title:
-            query_params["current_title"] = current_title if isinstance(current_title, list) else [current_title]
+            vals = current_title if isinstance(current_title, list) else [current_title]
+            vals = [v for v in vals if v is not None]
+            if vals:
+                query_params["current_title"] = vals
         if current_employer:
-            query_params["current_employer"] = current_employer if isinstance(current_employer, list) else [current_employer]
+            vals = current_employer if isinstance(current_employer, list) else [current_employer]
+            vals = [v for v in vals if v is not None]
+            if vals:
+                query_params["current_employer"] = vals
         if location:
-            query_params["location"] = location if isinstance(location, list) else [location]
+            vals = location if isinstance(location, list) else [location]
+            vals = [v for v in vals if v is not None]
+            if vals:
+                query_params["location"] = vals
         if industry:
-            query_params["industry"] = industry if isinstance(industry, list) else [industry]
+            vals = industry if isinstance(industry, list) else [industry]
+            vals = [v for v in vals if v is not None]
+            if vals:
+                query_params["industry"] = vals
         if keywords:
-            query_params["keyword"] = keywords if isinstance(keywords, list) else [keywords]
+            vals = keywords if isinstance(keywords, list) else [keywords]
+            vals = [v for v in vals if v is not None]
+            if vals:
+                query_params["keyword"] = vals
         if company_size:
-            query_params["company_size"] = company_size if isinstance(company_size, list) else [company_size]
-        
-        if query_params:
-            payload["query"] = query_params
-        
+            vals = company_size if isinstance(company_size, list) else [company_size]
+            vals = [v for v in vals if v is not None]
+            if vals:
+                query_params["company_size"] = vals
+
+        # Always include "query" key — API returns 400 if it is absent entirely
+        payload["query"] = query_params
+
         try:
             response = requests.post(endpoint, json=payload, headers=self.headers)
             response.raise_for_status()

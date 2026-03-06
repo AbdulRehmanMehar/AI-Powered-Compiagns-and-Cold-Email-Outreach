@@ -61,6 +61,38 @@ ZOHO_SMTP_PORT = int(os.getenv("ZOHO_SMTP_PORT", "587"))
 ZOHO_IMAP_HOST = os.getenv("ZOHO_IMAP_HOST", "imappro.zoho.com")
 ZOHO_IMAP_PORT = int(os.getenv("ZOHO_IMAP_PORT", "993"))
 
+# SMTP2GO - Multiple Accounts Support
+def parse_smtp2go_accounts() -> List[Dict[str, str]]:
+    """Parse SMTP2GO accounts from environment"""
+    emails = os.getenv("SMTP2GO_ACCOUNTS", "").split(",")
+    passwords = os.getenv("SMTP2GO_APP_PASSWORDS", "").split(",")
+    names = os.getenv("SMTP2GO_SENDER_NAMES", "").split(",")
+
+    accounts = []
+    for i, email in enumerate(emails):
+        email = email.strip()
+        if email:
+            accounts.append({
+                "email": email,
+                "password": passwords[i].strip() if i < len(passwords) else "",
+                "sender_name": names[i].strip() if i < len(names) else email.split("@")[0].capitalize()
+            })
+    return accounts
+
+SMTP2GO_ACCOUNTS = parse_smtp2go_accounts()
+SMTP2GO_SMTP_HOST = os.getenv("SMTP2GO_SMTP_HOST", "mail.smtp2go.com")
+SMTP2GO_SMTP_PORT = int(os.getenv("SMTP2GO_SMTP_PORT", "2525"))
+
+# Gmail IMAP — used for reply/bounce detection across all SMTP2GO accounts
+# All SMTP2GO accounts share a single Gmail inbox (via Reply-To or forwarding)
+GMAIL_IMAP_HOST = os.getenv("GMAIL_IMAP_HOST", "imap.gmail.com")
+GMAIL_IMAP_PORT = int(os.getenv("GMAIL_IMAP_PORT", "993"))
+GMAIL_IMAP_ACCOUNT = os.getenv("GMAIL_IMAP_ACCOUNT", "")
+GMAIL_IMAP_APP_PASSWORD = os.getenv("GMAIL_IMAP_APP_PASSWORD", "")
+
+# Primary sender mode: 'zoho' (legacy) or 'smtp2go' (new default)
+PRIMARY_SENDER_MODE = os.getenv("PRIMARY_SENDER_MODE", "smtp2go").lower()
+
 # Email rotation
 EMAIL_ROTATION_STRATEGY = os.getenv("EMAIL_ROTATION_STRATEGY", "round-robin")  # "round-robin" or "random"
 EMAILS_PER_ACCOUNT = int(os.getenv("EMAILS_PER_ACCOUNT", "5"))
@@ -76,7 +108,15 @@ ZOHO_PASSWORD = ZOHO_ACCOUNTS[0]["password"] if ZOHO_ACCOUNTS else ""
 
 # Email Settings
 FROM_NAME = os.getenv("FROM_NAME", "PrimeStrides Team")
-REPLY_TO = os.getenv("REPLY_TO", ZOHO_EMAIL)
+# Reply-To: default to Gmail IMAP account (replies come back to the shared inbox)
+# Falls back to first SMTP2GO account, then Zoho, then empty
+_default_reply_to = (
+    os.getenv("GMAIL_IMAP_ACCOUNT") or
+    (SMTP2GO_ACCOUNTS[0]["email"] if SMTP2GO_ACCOUNTS else None) or
+    ZOHO_EMAIL or
+    ""
+)
+REPLY_TO = os.getenv("REPLY_TO", _default_reply_to)
 
 # Follow-up Settings (Expert strategy: 2-3 emails max, short sequences = less spam)
 # Email 1: Initial (Day 0)
